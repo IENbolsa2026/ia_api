@@ -1,74 +1,84 @@
-# FastAPI Project with `create-fastapi-project`
+# pdf_analysis_service
 
-This is a FastAPI project initialized using [`create-fastapi-project`](https://github.com/allient/create-fastapi-project), designed to provide a quick start for building APIs with [FastAPI](https://fastapi.tiangolo.com/).
+Microservicio FastAPI que recibe un PDF vía HTTP, extrae el texto, lo analiza con **Groq** y avisa a **Django** por webhook. El progreso y el resultado se notifican en tiempo real por websocket.
 
-## Getting Started
+> ¿Querés **aprender FastAPI leyendo este código**? Abrí [doc/guia-flujo.md](doc/guia-flujo.md): tiene el diagrama del flujo de datos, el orden de lectura recomendado y cómo seguir cada etapa en vivo con los `print` de la consola marcados como `[FLUJO]`.
 
-The commands in this documentation can be customized on the **Makefile**. It can be started with and without docker.
+## Estructura
 
-This project uses poetry, if you don't have it installed, you can the follow the instruction in [Poetry Documentation](https://python-poetry.org/docs/#installation).
-
-- Run the server (Recommended using docker):
-
-```bash
-# Run locally with docker in dev mode and force build
-make run-dev-build
-# or
-# Run locally with docker in dev mode
-make run-dev
-# or
-# Run locally with docker in prod mode (Autorelod disabled)
-make run-prod
+```
+app/
+├── main.py                  arma la app e incluye los routers
+├── config.py                settings (env vars) tipados con Pydantic
+├── core/
+│   └── connection_manager.py  websockets + registro de jobs en memoria
+├── routers/
+│   ├── pdf.py               POST /procesar-pdf
+│   └── websocket.py         WS  /ws/{job_id}
+├── schemas/
+│   └── analisis.py          contrato JSON fijo (respuesta, WS, webhook)
+├── services/                lógica pura, sin FastAPI adentro
+│   ├── pdf_service.py       extraer_texto / resumir_texto
+│   ├── groq_service.py      skill + prompt + llamado a Groq
+│   └── django_client.py     aviso a Django (webhook)
+└── tasks/
+    └── procesar_pdf.py      orquesta: extraer → analizar → avisar
 ```
 
-Open [http://fastapi.localhost/docs](http://fastapi.localhost/docs) with your browser to see the result.
+Cada capa solo conoce a la de abajo: `routers` → `tasks` → `services`. Los `services` no saben nada de HTTP ni de FastAPI, así se testean con un script suelto.
 
+## Puesta en marcha
 
-- Run the server without docker:
-
-First, make sure you have all packages installed:
+Desde la raíz del proyecto (donde está `app/`, import path `app.main:app`):
 
 ```bash
-make install
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+cp .env.example .env   # y completá GROQ_API_KEY (+ DJANGO_WEBHOOK_URL si querés)
+
+uvicorn app.main:app --reload
+```
+
+- Docs interactivos: http://localhost:8000/docs
+- Health: http://localhost:8000/health
+
+## Probar los servicios solos (sin levantar el server)
+
+```bash
+python -c "from app.services.pdf_service import extraer_texto; print(extraer_texto(open('test.pdf','rb').read()))"
 ```
 
 ```bash
-make run-app
+python -c "from app.services.groq_service import analizar_texto; print(analizar_texto('Hola, esto es un documento de prueba.'))"
 ```
 
-Open [http://localhost:8000/docs](http://localhost:8000/docs) with your browser to see the result.
+## Endpoints
 
-You can start editing the server by modifying `app/main.py`.
+| Método | Ruta            | Descripción |
+|--------|-----------------|-------------|
+| POST   | `/procesar-pdf` | Multipart `file` (+) `job_id` opcional. Crea el job, dispara la tarea y responde `202` con `{job_id, estado}`. |
+| WS     | `/ws/{job_id}`  | Recibe snapshots y `{progreso, resultado, error}`. |
+| GET    | `/health`       | Health check. |
 
-## Learn More
+### Flujo WS
 
-To learn more about Fastapi, take a look at the following resources:
+El server envía mensajes `{tipo: "progreso"|"resultado"|"error"|"snapshot", job_id, estado, progreso, resultado?, error?, mensaje?}`.
+Al conectar, manda un `snapshot` con el estado actual; enviar `ping` por el socket devuelve otro snapshot.
 
-- [Fastapi Documentation](https://fastapi.tiangolo.com/).
-- [fastapi-alembic-sqlmodel-async](https://github.com/vargasjona/fastapi-alembic-sqlmodel-async).
-- [full-stack-fastapi-postgresql](https://github.com/tiangolo/full-stack-fastapi-postgresql).
-- [sqlmodel-tutorial](https://sqlmodel.tiangolo.com/tutorial/fastapi/).
-- [asyncer-tutorial](https://asyncer.tiangolo.com/tutorial/).
-- [fastapi-pagination](https://github.com/uriyyo/fastapi-pagination).
-- [fastapi-best-practices](https://github.com/zhanymkanov/fastapi-best-practices).
-- [awesome-fastapi](https://github.com/mjhea0/awesome-fastapi).
+## Configuración (`.env`)
 
-## Why use Create FastAPI Project?
+| Variable             | Uso |
+|----------------------|-----|
+| `GROQ_API_KEY`       | Key de Groq (https://console.groq.com/keys) |
+| `GROQ_MODEL`         | Modelo, por defecto `llama-3.3-70b-versatile` |
+| `DJANGO_WEBHOOK_URL` | URL del webhook de Django. Vacía ⇒ se omite el aviso. |
+| `PDF_MAX_MB`         | Límite de subida (20 MB) |
+| `PDF_MAX_CHARACTERES`| Recorte del texto antes de mandarlo al modelo |
 
-`create-fastapi-project` provides a streamlined way to kickstart your FastAPI projects. Here are some compelling reasons to choose it for your project setup:
+## Notas
 
-### Interactive Experience
-
-Running `pip install create-fastapi-project@latest` (with no arguments) launches an interactive experience that guides you through the process of setting up your project. This interactive approach simplifies the initial configuration and gets you started quickly.
-
-### Zero Dependencies
-
-`create-fastapi-project` has been designed to be lightweight and efficient. It requires zero external dependencies, ensuring that your project remains unburdened by unnecessary packages.
-
-### Reliability and Maintenance
-
-`create-fastapi-project` is officially maintained by the [Allient development team](https://www.allient.io/). It is well-tested and aligns with best practices, ensuring that it functions as expected and remains up to date with FastAPI's releases.
-
-By choosing `create-fastapi-project`, you streamline your initial project setup, leverage reliable patterns, and enjoy the convenience of a tool tailored for FastAPI development.
-
-We love ❤️ [FastAPI](https://fastapi.tiangolo.com/) and its ecosystem. You can check out the [create-fastapi-project GitHub repository](https://github.com/allient/create-fastapi-project) - your feedback and contributions are welcome!
+- El registro de jobs es **en memoria** (`app/core/connection_manager.py`): los estados y resultados viven en el proceso. Si se reinicia, los jobs mueren; la fuente de verdad persistente es Django.
+- Un PDF escaneado (sin capa de texto) falla en `extraer_texto` con `PdfError` → el job pasa a `ERROR` y se notifica.
+- CORS abierto por defecto; ajustar `BACKEND_CORS_ORIGINS`.

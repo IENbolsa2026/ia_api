@@ -1,72 +1,22 @@
 #!/usr/bin/make
 
-include .env
+.PHONY: help install run lint lint-fix
 
 help:
-	@echo "make"
-	@echo "    install"
-	@echo "        Install all packages of poetry project locally."
-	@echo "    run-app"
-	@echo "        Run app locally without docker."
-	@echo "    run-dev-build"
-	@echo "        Run development docker compose and force build containers."
-	@echo "    run-dev"
-	@echo "        Run development docker compose."
-	@echo "    stop-dev"
-	@echo "        Stop development docker compose."
-	@echo "    run-prod"
-	@echo "        Run production docker compose."
-	@echo "    stop-prod"
-	@echo "        Run production docker compose."	
-	@echo "    formatter"
-	@echo "        Apply black formatting to code."
-	@echo "    mypy"
-	@echo "        Check typing."		
-	@echo "    lint"
-	@echo "        Lint code with ruff, and check if black formatter should be applied."
-	@echo "    lint-watch"
-	@echo "        Lint code with ruff in watch mode."
-	@echo "    lint-fix"
-	@echo "        Lint code with ruff and try to fix."	
-	
+	@echo "make help      show this menu"
+	@echo "make install   crear .venv e instalar requirements.txt"
+	@echo "make run       levantar uvicorn app.main:app --reload sobre 0.0.0.0:8000"
+	@echo "make lint      ruff check + formato"
+	@echo "make lint-fix  ruff check + fixer"
+
 install:
-	cd backend/app && poetry install && cd ../..
+	python -m venv .venv && .venv/bin/pip install -r requirements.txt
 
-run-app:
-	cd backend/app && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8000 && cd ..
-
-
-run-dev-build:
-	docker compose -f docker-compose-dev.yml up --build
-
-run-dev:
-	docker compose -f docker-compose-dev.yml up
-
-stop-dev:
-	docker compose -f docker-compose-dev.yml down
-
-run-prod:
-	docker compose up --build
-
-stop-prod:
-	docker compose down
-
-formatter:
-	cd backend/app && \
-	poetry run black app
-
-mypy:
-	cd backend/app && \
-	poetry run mypy .
+run:
+	.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 lint:
-	cd backend/app && \
-	poetry run ruff app && poetry run black --check app
-
-lint-watch:
-	cd backend/app && \
-	poetry run ruff app --watch
+	.venv/bin/ruff check app
 
 lint-fix:
-	cd backend/app && \
-	poetry run ruff app --fix
+	.venv/bin/ruff check app --fix

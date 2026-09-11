@@ -1,0 +1,200 @@
+============================================================
+GUIA DE FLUJO - pdf_analysis_service
+Aprender a leer esta API como si la hubieras escrito vos
+============================================================
+
+0) QUE ES CADA ARCHIVO (de arriba a abajo)
+------------------------------------------------------------
+  routers/pdf.py            Reciben el HTTP, validan, crean el job y responden
+  routers/websocket.py       (entrada del POST /procesar-pdf y del WS /ws/{job_id})
+  tasks/procesar_pdf.py     Saben el ORDEN de las etapas de procesamiento
+  services/*.py             Logica pura: pdf (pypdf), groq (IA), django (webhook)
+  core/connection_manager.py  Caja de estado en memoria + websockets
+  schemas/analisis.py       Contratos JSON (Pydantic)
+  config.py                 Settings (env vars del .env)
+  main.py                   Arma la app y registra los routers (sin logica)
+
+
+1) LA REGLA DE LAS CAPAS (lo mas importante)
+------------------------------------------------------------
+  Cada archivo solo llama a los archivos de abajo, nunca a los de arriba:
+
+      routers  (reciben el HTTP)
+         |
+         v
+      tasks   (conocen el orden de las etapas)
+         |
+         v
+      services (logica pura, sin HTTP ni FastAPI adentro)
+
+  Compartidos por todos: connection_manager (estado), schemas (contratos),
+  config (settings).
+
+  Para saber de donde viene una funcion usas:
+      rg nombre_de_la_funcion app/
+  La respuesta es siempre una capa mas arriba.
+
+
+2) FLUJO DE ARRANQUE (una vez, al levantar el server)
+------------------------------------------------------------
+  uvicorn app.main:app --reload
+      |
+      v
+  app/main.py:14      app = FastAPI(...)
+  app/main.py:32      app.include_router(pdf.router)        -> POST /procesar-pdf
+  app/main.py:33      app.include_router(websocket.router)  -> WS /ws/{job_id}
+  app/main.py:36      GET /health
+
+  main.py no tiene logica: solo arma la app y registra routers.
+
+
+3) FLUJO DE UNA REQUEST: POST /procesar-pdf
+------------------------------------------------------------
+  CLIENTE                                     SERVIDOR
+   POST /procesar-pdf
+   body multipart: file=<PDF>, job_id?=...
+      |
+      |  match de ruta -> routers/pdf.py :: procesar_pdf()
+      |    FastAPI parsea el body con los type hints:
+      |      file:   Annotated[UploadFile, File(...)]
+      |      job_id: Annotated[str|None, Form(...)]
+      |
+      |  valida content-type / vacio / tamano
+      |      (si falla -> HTTPException 400 o 413)
+      |
+      |  manager.crear_job(job_id, nombre)   -> guarda {estado: PENDIENTE, progreso: 0}
+      |
+      |  asyncio.get_running_loop().create_task(tarea)
+      |      encola la tarea EN BACKGROUND y NO espera
+      |
+      <-- 202 Accepted: {job_id, estado: "PROCESANDO"}
+      (la request HTTP ya termino aca; el cliente se lleva un "boleto")
+      |
+      |  mientras tanto, el navegador se conecta al WS /ws/{job_id}
+      |  y recibe en vivo: snapshot, progreso, resultado o error.
+
+
+4) FLUJO DE LA TAREA EN BACKGROUND  (tasks/procesar_pdf.py)
+------------------------------------------------------------
+  procesar_pdf(job_id, filename, pdf_bytes)
+      |
+      +-- publicar(5%)    "Leyendo el PDF"
+      +-- await asyncio.to_thread(pdf_service.extraer_texto, pdf_bytes)  -> str
+      +-- pdf_service.resumir_texto(texto)                               -> str recortado
+      +-- publicar(40%)   "consultando a Groq"
+      +-- await asyncio.to_thread(groq_service.analizar_texto, texto)    -> AnalisisResultado
+      +-- resultado.model_dump(mode="json")                              -> dict
+      +-- publicar(90%)   "avisando a Django"
+      +-- await asyncio.to_thread(django_client.notificar_resultado, ...) -> POST a Django
+      +-- publicar("resultado", COMPLETADO, 100%)
+
+  publicar(...) hace 3 cosas:
+      1) arma un WebSocketMessage (schema)
+      2) manager.publicar(job_id, payload):  guarda el estado en memoria
+      3) broadcast(): difunde el JSON a los websockets conectados a ese job_id
+
+  POR QUE asyncio.to_thread(...)?
+     pypdf, Groq y httpx son funciones BLOQUEANTES. to_thread las corre en un
+     hilo aparte para no congelar el loop de eventos (el que atiende a todos
+     los requests). Regla: solo await lo que realmente bloquea.
+
+  OBJETO -> JSON:
+     model_dump(mode="json")   objeto Pydantic -> dict
+     model_validate_json(...)  JSON -> objeto Pydantic
+
+
+5) SI ALGO FALLA
+------------------------------------------------------------
+  puede caer:
+     extraer_texto      -> PdfError        (PDF vacio/escaneado/corrupto)
+     analizar_texto     -> GroqError       (sin key / JSON invalido / API caida)
+     notificar_resultado-> DjangoClientError (webhook fallo)
+      |
+      v
+  1) logger.exception(...)                     -> traceback en consola
+  2) django_client.notificar_error(...)        -> avisar el error a Django
+  3) publicar("tipo":"error", estado=ERROR)    -> avisar por websocket
+
+  El job queda en memoria con {estado: ERROR, error: "..."}.
+
+
+6) EL WEBSOCKET (del navegador)
+------------------------------------------------------------
+  CLIENTE                                  SERVIDOR
+   WS /ws/{job_id}  ------------------->  routers/websocket.py
+                                          manager.get_job()?  si no existe -> close 4404
+                                          manager.connect(job_id, ws)
+   <- snapshot (estado actual del job)    (por si se conecto tarde)
+   a partir de ahi recibe solo lo que la tarea publique (progreso, resultado, error)
+   envia "ping"   -------------------->  responde con el snapshot actualizado
+
+  El connection_manager es el puente invisible: la tarea publica por job_id
+  sin saber quien escucha.
+
+
+7) ORDEN DE LECTURA RECOMENDADO
+------------------------------------------------------------
+  1. routers/pdf.py            entrada, todo FastAPI puro
+  2. tasks/procesar_pdf.py     el cerebro: el orden de las etapas
+  3. services/*.py             las cajas negras (pdf, groq, django)
+  4. schemas/analisis.py       los contratos
+  5. core/connection_manager.py la caja de estado compartida
+  6. config.py y main.py       al final (no tienen historia)
+
+
+8) CONCEPTOS DE FASTAPI QUE ESTAS VIENDO AQUI
+------------------------------------------------------------
+  APIRouter
+      routers/*.py                modulos de rutas reutilizables
+  include_router
+      main.py                     montar routers en la app
+  @router.post("/procesar-pdf", response_model=ProcesarPdfResponse, status_code=202)
+      pdf.py                      define metodo + path + contrato de salida
+  Annotated[UploadFile, File(...)] / Form(...)
+      pdf.py                      FastAPI parsea el body segun el type hint
+  HTTPException(status, detail)
+      pdf.py                      respuesta de error con su status
+  status.HTTP_202_ACCEPTED
+      pdf.py                      constantes de status HTTP
+  asyncio.to_thread(...)
+      tasks/                      correr codigo bloqueante sin congelar el loop
+  asyncio.create_task(...)
+      pdf.py                      lanzar trabajo en background "fire and forget"
+  response_model + schemas Pydantic
+      pdf.py / schemas            validacion automatica + docs en /docs
+  model_dump(mode="json")
+      tasks/                      objeto Pydantic -> dict/JSON
+  @router.websocket("/ws/{job_id}")
+      websocket.py                conexion bidireccional en tiempo real
+
+
+9) COMO SEGUIRLO EN VIVO (prints [FLUJO] en la consola)
+------------------------------------------------------------
+  Levantas el server, subis un PDF desde http://localhost:8000/docs
+  y en la consola ves algo asi:
+
+  [FLUJO] POST /procesar-pdf recibe 'test.pdf' de 12345 bytes ...
+  [FLUJO] job ... registrado en memoria (estado PENDIENTE).
+  [FLUJO] create_task lanzo la tarea en background -> respondo 202 al cliente
+  [FLUJO] === TAREA procesar_pdf('...') arranca en background ===
+  [FLUJO] pdf_service.extraer_texto: pypdf abrio 2 paginas
+  [FLUJO] manager.publicar: ... progreso ... PROCESANDO 5%
+  [FLUJO] etapa 1/3: texto extraido y recortado -> 4321 caracteres
+  [FLUJO] manager.publicar: ... progreso ... PROCESANDO 40%
+  [FLUJO] groq_service.analizar_texto: 4321 chars -> modelo llama-3.3-70b-versatile
+  [FLUJO] groq_service._llamar: respuesta cruda de 980 chars
+  [FLUJO] etapa 2/3: Groq respondio OK -> resumen: 'Resumen del documento...'
+  [FLUJO] manager.publicar: ... progreso ... PROCESANDO 90%
+  [FLUJO] etapa 3/3: resultado enviado a Django (o aviso omitido sin URL)
+  [FLUJO] manager.publicar: ... resultado ... COMPLETADO 100%
+  [FLUJO] === TAREA terminada: COMPLETADO publicado por websocket ===
+
+  Para el websocket: abri http://localhost:8000/ws-test, pegas el job_id y te conectas.
+
+  Con un .txt en vez de PDF ves el cortocircuito: HTTPException 400 y ningun
+  print de la tarea. Con la GROQ_API_KEY placeholder ves el camino de error.
+
+  Para sacar los prints cuando no los necesites:
+      rg '\[FLUJO\]' app/
+      (borrar esas lineas print)
+============================================================
