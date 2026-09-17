@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 @celery_app.task(bind=True, max_retries=3, name="app.tasks.analyze_cv")
 def analyze_cv_task(
     self: Any,
+    analysis_id: int,
     candidate_id: int,
     cv_text: str,
 ) -> dict[str, Any]:
@@ -33,6 +34,7 @@ def analyze_cv_task(
     try:
         analysis = asyncio.run(process_cv_text(cv_text))
         payload: dict[str, Any] = {
+            "analysis_id": analysis_id,
             "job_id": self.request.id,
             "candidate_id": candidate_id,
             "status": "completed",
@@ -52,6 +54,7 @@ def analyze_cv_task(
             raise self.retry(exc=exc, countdown=countdown) from exc
 
         failure_payload: dict[str, Any] = {
+            "analysis_id": analysis_id,
             "job_id": self.request.id,
             "candidate_id": candidate_id,
             "status": "failed",

@@ -14,6 +14,7 @@ class CVAnalysisStatus(str, Enum):
 class CVAnalysisRequest(BaseModel):
     """Cuerpo JSON que la aplicacion origen envia a ``POST /cv-analyses``."""
 
+    analysis_id: int = Field(gt=0)
     candidate_id: int = Field(gt=0)
     cv_text: str = Field(min_length=1)
 

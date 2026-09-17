@@ -17,7 +17,7 @@ def notify_cv_result(payload: dict[str, Any]) -> None:
 
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if settings.CV_RESULT_CALLBACK_SECRET:
-        headers["X-Callback-Secret"] = settings.CV_RESULT_CALLBACK_SECRET
+        headers["X-IA-Callback-Token"] = settings.CV_RESULT_CALLBACK_SECRET
 
     # Siempre usar timeout: sin este limite, una aplicacion destino caida puede
     # ocupar workers indefinidamente y dejar de procesar nuevos CVs.

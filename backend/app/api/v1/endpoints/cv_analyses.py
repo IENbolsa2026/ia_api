@@ -30,6 +30,7 @@ async def create_cv_analysis(
     """
 
     task = analyze_cv_task.delay(
+        analysis_id=payload.analysis_id,
         candidate_id=payload.candidate_id,
         cv_text=payload.cv_text,
     )

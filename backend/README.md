@@ -7,7 +7,7 @@ envia el resultado JSON a otra aplicacion mediante un callback HTTP.
 
 ```text
 Aplicacion origen
-   | POST /api/v1/cv-analyses { candidate_id, cv_text }
+   | POST /api/v1/cv-analyses { analysis_id, candidate_id, cv_text }
    v
 FastAPI valida el JSON y publica una tarea en Redis
    | responde 202 { job_id, status: "queued" }
@@ -97,6 +97,7 @@ proyecto y esta ignorado por Git.
 
 ```json
 {
+  "analysis_id": 456,
   "candidate_id": 123,
   "cv_text": "Ana Perez. Desarrolladora Python con 3 anos de experiencia..."
 }
@@ -111,7 +112,7 @@ Respuesta inmediata (`202 Accepted`):
 }
 ```
 
-Validaciones automaticas de FastAPI/Pydantic: `candidate_id` debe ser mayor a
+Validaciones automaticas de FastAPI/Pydantic: `analysis_id` y `candidate_id` deben ser mayores a
 cero y `cv_text` no puede estar vacio. Si el JSON no las cumple, FastAPI responde
 `422` explicando el campo invalido.
 
@@ -136,6 +137,7 @@ Al completar exitosamente, el worker envia un `POST` a
 
 ```json
 {
+  "analysis_id": 456,
   "job_id": "id-generado-por-celery",
   "candidate_id": 123,
   "status": "completed",
@@ -152,7 +154,7 @@ Al fallar despues de todos los reintentos, envia el mismo contrato con
 `CV_RESULT_CALLBACK_SECRET`, tambien se envia el header:
 
 ```text
-X-Callback-Secret: tu-secreto-compartido
+X-IA-Callback-Token: tu-secreto-compartido
 ```
 
 La otra aplicacion debe verificar ese valor antes de aceptar el callback y debe
