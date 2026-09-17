@@ -1,14 +1,14 @@
-from uuid import UUID
+from celery.result import AsyncResult
+from fastapi import APIRouter, status
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
-
+from app.core.celery_app import celery_app
 from app.schemas.cv_analysis import (
     CVAnalysisAccepted,
-    CVAnalysisDetail,
     CVAnalysisRequest,
+    CVAnalysisStatus,
+    CVAnalysisTaskStatus,
 )
-from app.services.cv_analysis_runner import run_cv_analysis
-from app.services.job_store import create_job, get_job
+from app.tasks.cv_analysis_tasks import analyze_cv_task
 
 
 router = APIRouter()
@@ -21,35 +21,56 @@ router = APIRouter()
 )
 async def create_cv_analysis(
     payload: CVAnalysisRequest,
-    background_tasks: BackgroundTasks,
 ) -> CVAnalysisAccepted:
-    job = create_job(candidate_id=payload.candidate_id)
+    """Acepta un CV y envia el trabajo al broker de Celery.
 
-    background_tasks.add_task(
-        run_cv_analysis,
-        job.job_id,
-        payload.cv_text,
+    Una ruta ``async`` de FastAPI debe terminar rapido: su funcion es recibir,
+    validar y responder HTTP. ``delay`` publica un mensaje en Redis y devuelve
+    sin esperar a Groq. Otro proceso, el worker de Celery, consumira el mensaje.
+    """
+
+    task = analyze_cv_task.delay(
+        candidate_id=payload.candidate_id,
+        cv_text=payload.cv_text,
     )
 
+    # 202 comunica correctamente que el servidor acepto el pedido, pero aun no
+    # tiene el resultado. task.id sirve para consultar el endpoint GET.
     return CVAnalysisAccepted(
-        job_id=job.job_id,
-        status=job.status,
+        job_id=task.id,
+        status=CVAnalysisStatus.queued,
     )
 
 
 @router.get(
     "/cv-analyses/{job_id}",
-    response_model=CVAnalysisDetail,
+    response_model=CVAnalysisTaskStatus,
 )
 async def retrieve_cv_analysis(
-    job_id: UUID,
-) -> CVAnalysisDetail:
-    job = get_job(job_id)
+    job_id: str,
+) -> CVAnalysisTaskStatus:
+    """Traduce los estados de Celery al contrato publico de esta API."""
 
-    if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="CV analysis not found",
-        )
+    task = AsyncResult(job_id, app=celery_app)
+    celery_statuses = {
+        "PENDING": CVAnalysisStatus.queued,
+        "RECEIVED": CVAnalysisStatus.queued,
+        "STARTED": CVAnalysisStatus.processing,
+        "RETRY": CVAnalysisStatus.processing,
+        "SUCCESS": CVAnalysisStatus.completed,
+        "FAILURE": CVAnalysisStatus.failed,
+        "REVOKED": CVAnalysisStatus.failed,
+    }
+    api_status = celery_statuses.get(task.state, CVAnalysisStatus.processing)
 
-    return job
+    # El worker devuelve un dict al completar. Si falla, Celery guarda la
+    # excepcion como resultado; se transforma a texto para el cliente HTTP.
+    result = task.result if task.successful() and isinstance(task.result, dict) else None
+    error = str(task.result) if task.failed() else None
+
+    return CVAnalysisTaskStatus(
+        job_id=job_id,
+        status=api_status,
+        result=result,
+        error=error,
+    )

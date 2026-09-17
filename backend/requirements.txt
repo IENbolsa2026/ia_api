@@ -10,3 +10,7 @@ starlette>=0.36.0,<0.37.0
 groq>=0.9.0
 pyjwt>=2.8.0
 typer>=0.16.0
+# Celery ejecuta trabajos lentos fuera del proceso HTTP de FastAPI.
+celery>=5.4.0,<6.0.0
+# Cliente del servidor Redis que Celery usa como cola y backend de resultados.
+redis>=5.0.0,<6.0.0

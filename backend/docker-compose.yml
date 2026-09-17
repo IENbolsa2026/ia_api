@@ -1,0 +1,12 @@
+services:
+  # Redis no almacena los CV como base de datos de negocio: aqui actua como
+  # mensajero entre FastAPI y Celery, y conserva el estado temporal de tareas.
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:

@@ -1,9 +1,8 @@
 import asyncio
 import json
-import os
-from typing import Any
 
 from groq import Groq
+
 from app.core.config import settings
 
 
@@ -42,7 +41,11 @@ No agregues texto extra.
 
 
 def split_text_into_blocks(text: str, max_chars: int) -> list[str]:
-    """Divide el texto en bloques de ~max_chars, cortando en salto de línea si es posible."""
+    """Divide el texto en bloques compatibles con el limite de contexto del modelo.
+
+    Si encuentra un salto de linea dentro del limite, corta alli para no partir
+    una frase o seccion del CV innecesariamente.
+    """
     if len(text) <= max_chars:
         return [text]
     blocks = []
@@ -59,7 +62,11 @@ def split_text_into_blocks(text: str, max_chars: int) -> list[str]:
 
 
 def call_groq(messages: list[dict], max_tokens: int) -> dict:
-    """Llamada síncrona a Groq (se ejecuta en thread pool)."""
+    """Llamada bloqueante a Groq que se ejecuta en un thread separado.
+
+    El SDK de Groq es sincronico. Por eso las funciones async no lo llaman
+    directo: lo delegan a un executor y asi no bloquean su event loop.
+    """
     resp = client.chat.completions.create(
         model=settings.CV_MODEL,
         messages=messages,
@@ -72,12 +79,12 @@ def call_groq(messages: list[dict], max_tokens: int) -> dict:
 
 
 async def extract_block(block: str, block_num: int, total: int) -> dict:
-    """Extrae habilidades de un bloque (async wrapper)."""
+    """Extrae habilidades de un bloque sin bloquear el event loop async."""
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"--- BLOQUE {block_num} de {total} ---\n{block}"},
     ]
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None, call_groq, messages, settings.GROQ_MAX_TOKENS
     )
@@ -86,13 +93,13 @@ async def extract_block(block: str, block_num: int, total: int) -> dict:
 
 
 async def consolidate_extractions(extractions: list[dict]) -> dict:
-    """Consolida todas las extracciones en evaluación final."""
+    """Pide al modelo una respuesta final a partir de los bloques extraidos."""
     combined = {"extracciones": extractions}
     messages = [
         {"role": "system", "content": CONSOLIDATION_PROMPT},
         {"role": "user", "content": json.dumps(combined, ensure_ascii=False)},
     ]
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None, call_groq, messages, settings.GROQ_MAX_TOKENS
     )
@@ -100,7 +107,11 @@ async def consolidate_extractions(extractions: list[dict]) -> dict:
 
 
 async def process_cv_text(text: str) -> dict:
-    """Pipeline completo: split → extraer cada bloque → consolidar."""
+    """Pipeline completo: dividir, extraer cada bloque y consolidar el resultado.
+
+    Esta funcion no conoce HTTP ni Celery. Esa separacion permite reutilizar la
+    logica de IA desde una tarea, un test o una interfaz futura.
+    """
     blocks = split_text_into_blocks(text, settings.CV_BLOQUE_CARACTERES)
     total = len(blocks)
 

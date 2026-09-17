@@ -1,67 +1,26 @@
 #!/usr/bin/make
 
-include .env
+# Atajos opcionales para no recordar los comandos de desarrollo.
+# Ejecutar cada servicio en una terminal distinta: Redis, API y worker.
 
 help:
-	@echo "make"
-	@echo "    install"
-	@echo "        Install all packages of poetry project locally."
-	@echo "    run-app"
-	@echo "        Run app locally without docker."
-	@echo "    run-dev-build"
-	@echo "        Run development docker compose and force build containers."
-	@echo "    run-dev"
-	@echo "        Run development docker compose."
-	@echo "    stop-dev"
-	@echo "        Stop development docker compose."
-	@echo "    run-prod"
-	@echo "        Run production docker compose."
-	@echo "    stop-prod"
-	@echo "        Run production docker compose."	
-	@echo "    formatter"
-	@echo "        Apply black formatting to code."
-	@echo "    mypy"
-	@echo "        Check typing."		
-	@echo "    lint"
-	@echo "        Lint code with ruff, and check if black formatter should be applied."
-	@echo "    lint-watch"
-	@echo "        Lint code with ruff in watch mode."
-	@echo "    lint-fix"
-	@echo "        Lint code with ruff and try to fix."	
-	
+	@echo "install       Instala dependencias en .venv"
+	@echo "run-api       Inicia FastAPI en modo desarrollo"
+	@echo "run-worker    Inicia el worker de Celery"
+	@echo "run-redis     Inicia Redis mediante Docker Compose"
+	@echo "stop-redis    Detiene Redis"
+
 install:
-	poetry install
+	.venv/bin/python -m pip install -r requirements.txt
 
-run-app:
-	poetry run uvicorn app.main:app --host 0.0.0.0 --port 8000
+run-api:
+	.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
+run-worker:
+	.venv/bin/celery -A app.core.celery_app.celery_app worker --loglevel=info
 
-run-dev-build:
-	docker compose -f docker-compose-dev.yml up --build
+run-redis:
+	docker compose up -d redis
 
-run-dev:
-	docker compose -f docker-compose-dev.yml up
-
-stop-dev:
-	docker compose -f docker-compose-dev.yml down
-
-run-prod:
-	docker compose up --build
-
-stop-prod:
+stop-redis:
 	docker compose down
-
-formatter:
-	poetry run black app
-
-mypy:
-	poetry run mypy .
-
-lint:
-	poetry run ruff app && poetry run black --check app
-
-lint-watch:
-	poetry run ruff app --watch
-
-lint-fix:
-	poetry run ruff app --fix

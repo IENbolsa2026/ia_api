@@ -1,23 +1,25 @@
-from fastapi import (
-    FastAPI,
-)
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
+
 from app.api.v1.api import api_router as api_router_v1
 from app.core.config import settings
-from contextlib import asynccontextmanager
-from starlette.middleware.cors import CORSMiddleware
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    print("startup fastapi")
+    """Hook de ciclo de vida de FastAPI.
+
+    FastAPI ejecuta el codigo anterior a ``yield`` al iniciar y el posterior al
+    detenerse. Es el lugar indicado para abrir/cerrar recursos compartidos si
+    mas adelante se agregan conexiones propias de la API web.
+    """
+
     yield
-    # shutdown
-    print("shutdown fastapi")
-    
 
-
-# Core Application Instance
+# Esta es la aplicacion ASGI que Uvicorn sirve. FastAPI usa las anotaciones de
+# tipo y los modelos Pydantic de las rutas para validar JSON y generar /docs.
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.API_VERSION,
@@ -25,7 +27,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Set all CORS origins enabled
+# CORS solo afecta a navegadores. La llamada servidor-a-servidor del callback no
+# necesita CORS, pero el frontend que consuma la API posiblemente si.
 if settings.BACKEND_CORS_ORIGINS:
     app.add_middleware(
         CORSMiddleware,
@@ -36,13 +39,12 @@ if settings.BACKEND_CORS_ORIGINS:
     )
 
 @app.get("/")
-async def root():
-    """
-    An example "Hello world" FastAPI route.
-    """
-    # if oso.is_allowed(user, "read", message):
-    return {"message": "Hello World"}
+async def root() -> dict[str, str]:
+    """Endpoint simple para comprobar que el servidor HTTP esta disponible."""
+
+    return {"message": "CV analyzer API is running"}
 
 
-# Add Routers
+# Agrupar las rutas en routers mantiene main.py pequeno. El prefijo final sera
+# /api/v1 porque settings.API_V1_STR se aplica al incluir este router.
 app.include_router(api_router_v1, prefix=settings.API_V1_STR)
