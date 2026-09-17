@@ -5,11 +5,13 @@ modulo para ejecutarla fuera del proceso web.
 """
 
 import asyncio
+import base64
 import logging
 from typing import Any
 
 from app.core.celery_app import celery_app
 from app.services.cv_pipeline import process_cv_text
+from app.services.pdf_text import extract_pdf_text
 from app.services.result_notifier import notify_cv_result
 
 
@@ -21,7 +23,7 @@ def analyze_cv_task(
     self: Any,
     analysis_id: int,
     candidate_id: int,
-    cv_text: str,
+    cv_pdf_base64: str,
 ) -> dict[str, Any]:
     """Analiza un CV, avisa el resultado y devuelve el payload a Celery.
 
@@ -32,6 +34,7 @@ def analyze_cv_task(
     """
 
     try:
+        cv_text = extract_pdf_text(base64.b64decode(cv_pdf_base64, validate=True))
         analysis = asyncio.run(process_cv_text(cv_text))
         payload: dict[str, Any] = {
             "analysis_id": analysis_id,

@@ -1,10 +1,11 @@
+import base64
+
 from celery.result import AsyncResult
-from fastapi import APIRouter, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.core.celery_app import celery_app
 from app.schemas.cv_analysis import (
     CVAnalysisAccepted,
-    CVAnalysisRequest,
     CVAnalysisStatus,
     CVAnalysisTaskStatus,
 )
@@ -20,19 +21,30 @@ router = APIRouter()
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def create_cv_analysis(
-    payload: CVAnalysisRequest,
+    analysis_id: int = Form(gt=0),
+    candidate_id: int = Form(gt=0),
+    cv: UploadFile = File(...),
 ) -> CVAnalysisAccepted:
-    """Acepta un CV y envia el trabajo al broker de Celery.
+    """Acepta un PDF y envia su extracción y análisis al worker de Celery.
 
     Una ruta ``async`` de FastAPI debe terminar rapido: su funcion es recibir,
-    validar y responder HTTP. ``delay`` publica un mensaje en Redis y devuelve
-    sin esperar a Groq. Otro proceso, el worker de Celery, consumira el mensaje.
+    validar y responder HTTP. El PDF se serializa para Redis; su lectura y el
+    análisis con Groq suceden en el worker, fuera de la petición HTTP.
     """
 
+    if cv.content_type not in {"application/pdf", "application/x-pdf"}:
+        raise HTTPException(status_code=415, detail="El CV debe enviarse en formato PDF.")
+
+    pdf_bytes = await cv.read()
+    if not pdf_bytes:
+        raise HTTPException(status_code=422, detail="El PDF está vacío.")
+    if len(pdf_bytes) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="El PDF supera el máximo de 5 MB.")
+
     task = analyze_cv_task.delay(
-        analysis_id=payload.analysis_id,
-        candidate_id=payload.candidate_id,
-        cv_text=payload.cv_text,
+        analysis_id=analysis_id,
+        candidate_id=candidate_id,
+        cv_pdf_base64=base64.b64encode(pdf_bytes).decode("ascii"),
     )
 
     # 202 comunica correctamente que el servidor acepto el pedido, pero aun no

@@ -33,7 +33,7 @@ class Settings(BaseSettings, extra="ignore"):
     SERVICE_USER: str
     SERVICE_PASSWORD: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    CV_MODEL: str = "qwen/qwen3-32b"
+    CV_MODEL: str = "qwen/qwen3.8-27b"
     CV_BLOQUE_CARACTERES: int = 4000
     GROQ_MAX_TOKENS: int = 950
     GROQ_PAUSA_SEGUNDOS: int = 12
