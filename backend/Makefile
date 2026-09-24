@@ -17,7 +17,7 @@ run-api:
 	.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 
 run-worker:
-	.venv/bin/celery -A app.core.celery_app.celery_app worker --loglevel=info
+	.venv/bin/celery -A app.core.celery_app.celery_app worker --loglevel=info --pool=solo
 
 run-redis:
 	docker compose up -d redis

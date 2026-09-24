@@ -24,6 +24,7 @@ def analyze_cv_task(
     analysis_id: int,
     candidate_id: int,
     cv_pdf_base64: str,
+    analysis_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Analiza un CV, avisa el resultado y devuelve el payload a Celery.
 
@@ -33,9 +34,12 @@ def analyze_cv_task(
     el pipeline asincronico ya existente.
     """
 
+    analysis = analysis_result
+
     try:
-        cv_text = extract_pdf_text(base64.b64decode(cv_pdf_base64, validate=True))
-        analysis = asyncio.run(process_cv_text(cv_text))
+        if analysis is None:
+            cv_text = extract_pdf_text(base64.b64decode(cv_pdf_base64, validate=True))
+            analysis = asyncio.run(process_cv_text(cv_text))
         payload: dict[str, Any] = {
             "analysis_id": analysis_id,
             "job_id": self.request.id,
@@ -54,7 +58,19 @@ def analyze_cv_task(
         # servicio que probablemente sigue momentaneamente caido.
         if self.request.retries < self.max_retries:
             countdown = 2**self.request.retries
-            raise self.retry(exc=exc, countdown=countdown) from exc
+            retry_kwargs = {
+                "analysis_id": analysis_id,
+                "candidate_id": candidate_id,
+                # Si Groq ya terminó, conservar el resultado evita volver a
+                # analizar todo el CV cuando solamente falla el callback.
+                "cv_pdf_base64": cv_pdf_base64 if analysis is None else "",
+                "analysis_result": analysis,
+            }
+            raise self.retry(
+                exc=exc,
+                countdown=countdown,
+                kwargs=retry_kwargs,
+            ) from exc
 
         failure_payload: dict[str, Any] = {
             "analysis_id": analysis_id,
