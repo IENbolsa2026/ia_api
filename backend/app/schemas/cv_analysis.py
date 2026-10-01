@@ -1,12 +1,14 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 class CVAnalysisStatus(str, Enum):
     """Estados internos de una tarea, independientes de los nombres de Celery."""
 
     queued = "queued"
+    accepted = "accepted"
+    rate_limited = "rate_limited"
     processing = "processing"
     completed = "completed"
     failed = "failed"
@@ -18,14 +20,7 @@ class CVAnalysisAccepted(BaseModel):
     # aceptar tambien ids validos que una implementacion distinta de Celery use.
     job_id: str
     status: CVAnalysisStatus
-
-
-class CVAnalysisDetail(CVAnalysisAccepted):
-    """Estado consultable de una tarea encolada."""
-
-    candidate_id: int
-    result: dict[str, Any] | None = None
-    error: str | None = None
+    request_id: str | None = None
 
 
 class CVAnalysisTaskStatus(BaseModel):
@@ -40,3 +35,4 @@ class CVAnalysisTaskStatus(BaseModel):
     status: CVAnalysisStatus
     result: dict[str, Any] | None = None
     error: str | None = None
+    delivered: bool = False
