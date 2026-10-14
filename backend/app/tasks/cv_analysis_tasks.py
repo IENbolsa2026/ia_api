@@ -13,6 +13,7 @@ from app.core.celery_app import celery_app
 from app.services.cv_pipeline import process_cv_text
 from app.services.pdf_text import extract_pdf_text
 from app.services.result_notifier import notify_cv_result
+from app.services.channel_events import publish_cv_analysis_complete
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ def analyze_cv_task(
     candidate_id: int,
     cv_pdf_base64: str,
     analysis_result: dict[str, Any] | None = None,
+    user_id: int | None = None,
 ) -> dict[str, Any]:
     """Analiza un CV, avisa el resultado y devuelve el payload a Celery.
 
@@ -49,6 +51,8 @@ def analyze_cv_task(
             "error": None,
         }
         notify_cv_result(payload)
+        if user_id is not None:
+            publish_cv_analysis_complete(user_id, analysis_id, 'completado')
         return payload
     except Exception as exc:
         logger.exception("CV analysis failed for task %s", self.request.id)
@@ -61,6 +65,7 @@ def analyze_cv_task(
             retry_kwargs = {
                 "analysis_id": analysis_id,
                 "candidate_id": candidate_id,
+                "user_id": user_id,
                 # Si Groq ya terminó, conservar el resultado evita volver a
                 # analizar todo el CV cuando solamente falla el callback.
                 "cv_pdf_base64": cv_pdf_base64 if analysis is None else "",
@@ -84,6 +89,8 @@ def analyze_cv_task(
             # Incluso tras un fallo final avisamos al sistema origen para que no
             # quede esperando una respuesta que nunca llegara.
             notify_cv_result(failure_payload)
+            if user_id is not None:
+                publish_cv_analysis_complete(user_id, analysis_id, 'error')
         except Exception:
             logger.exception("Could not deliver failure callback for task %s", self.request.id)
 

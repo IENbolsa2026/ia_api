@@ -23,6 +23,7 @@ router = APIRouter()
 async def create_cv_analysis(
     analysis_id: int = Form(gt=0),
     candidate_id: int = Form(gt=0),
+    user_id: int | None = Form(default=None, gt=0),
     cv: UploadFile = File(...),
 ) -> CVAnalysisAccepted:
     """Acepta un PDF y envia su extracción y análisis al worker de Celery.
@@ -44,6 +45,7 @@ async def create_cv_analysis(
     task = analyze_cv_task.delay(
         analysis_id=analysis_id,
         candidate_id=candidate_id,
+        user_id=user_id,
         cv_pdf_base64=base64.b64encode(pdf_bytes).decode("ascii"),
     )
 

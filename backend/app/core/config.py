@@ -42,6 +42,8 @@ class Settings(BaseSettings, extra="ignore"):
     # endpoint GET pueda informar queued/processing/completed/failed.
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+    # Compartida con CHANNEL_REDIS_URL de Django para los eventos WebSocket.
+    CHANNEL_REDIS_URL: str = "redis://localhost:6379/2"
 
     # URL de la otra aplicacion. Al terminar el analisis se hace POST aqui.
     CV_RESULT_CALLBACK_URL: AnyHttpUrl

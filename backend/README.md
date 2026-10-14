@@ -14,8 +14,9 @@ FastAPI valida el PDF y publica una tarea en Redis
    v
 Worker Celery toma la tarea y consulta Groq
    | POST resultado final al callback configurado
+   | tras confirmar el guardado, publica cv.analysis.complete en Redis
    v
-Aplicacion origen guarda o muestra el resultado
+Aplicacion origen guarda el resultado y avisa por WebSocket al postulante
 ```
 
 FastAPI atiende HTTP; no deberia esperar los segundos que tarda la IA. Celery
@@ -75,6 +76,7 @@ GROQ_API_KEY=tu-clave-de-groq
 CV_MODEL=qwen/qwen3.8-27b
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
+CHANNEL_REDIS_URL=redis://localhost:6379/2
 CV_RESULT_CALLBACK_URL=http://127.0.0.1:8000/ia/llegue/
 CV_RESULT_CALLBACK_SECRET=elegi-un-secreto-local
 ```
@@ -91,6 +93,7 @@ el `.env` y ejecuta migraciones. Los valores necesarios son:
 ```dotenv
 IA_API_URL=http://127.0.0.1:8001/api/v1/cv-analyses
 IA_CALLBACK_TOKEN=elegi-un-secreto-local
+CHANNEL_REDIS_URL=redis://localhost:6379/2
 ```
 
 Consulta el [README de Django](../../repositorio/BolsaTrabajo/README.md)
