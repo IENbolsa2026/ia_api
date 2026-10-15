@@ -95,7 +95,7 @@ async def _call_async(system_prompt: str, payload: str, marker: str) -> dict[str
 
 
 async def process_cv_text(text: str, candidate_id: int) -> dict[str, Any]:
-    """Extrae bloques y consolida un perfil inglés validado."""
+    """Extrae bloques y consolida un perfil en español validado."""
 
     system = load_prompt("cv_extraction.v1.system.md")
     fragments: list[dict[str, Any]] = []
