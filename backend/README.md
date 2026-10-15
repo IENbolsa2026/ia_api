@@ -261,3 +261,16 @@ Las rutas de análisis y comparación usan el mismo `SERVICE_API_TOKEN`. El work
 de trabajo. `MATCH_GROQ_MODEL` permite elegir otro modelo para compatibilidad;
 si se omite usa `CV_MODEL`. El limitador Redis de Groq se comparte con extracción.
 El puerto 8002 y el paquete `jev_match_api` ya no forman parte del arranque.
+
+## Prompt y cálculo de compatibilidad
+
+- `app/prompts/match-rubric.v1.md`: reglas de evidencia y evaluación de perfiles.
+- `app/services/match_groq.py`, método `GroqClient.evaluate`: prompt de sistema,
+  esquema JSON y llamada a Groq. La IA devuelve cuatro puntajes de 0 a 4.
+- `app/services/match_scoring.py`: preguntas, pesos y fórmula del porcentaje.
+  `build_result` combina habilidades (45%), experiencia (25%), formación e idiomas
+  (15%) y preferencias (15%). Aplica un máximo de 40% si un requisito excluyente
+  no tiene respaldo. El porcentaje se calcula en Python, no lo inventa el prompt.
+
+El paquete `ien_contracts/` se incluye en el repositorio. No requiere la carpeta
+externa `C:\IEN\contracts`. Mantener sus modelos v1 sincronizados con Django.

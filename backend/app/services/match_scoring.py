@@ -62,8 +62,8 @@ def _assess_requirements(candidate: dict[str, Any], offer: dict[str, Any]) -> tu
     return assessments, coverage
 
 
-def build_result(request: dict[str, Any], jev_response: dict[str, Any]) -> MatchResult:
-    answers = jev_response["answers"]
+def build_result(request: dict[str, Any], provider_response: dict[str, Any]) -> MatchResult:
+    answers = provider_response["answers"]
     for key in WEIGHTS:
         answer = answers.get(key, {})
         for field, maximum in [('score', 4), ('confidence', 1)]:

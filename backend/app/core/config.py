@@ -1,15 +1,11 @@
 from enum import Enum
 from pathlib import Path
-import sys
 
 from pydantic import AnyHttpUrl
 from pydantic_settings import BaseSettings
 
 
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
-CONTRACTS_DIR = Path(__file__).resolve().parents[5] / "contracts"
-if str(CONTRACTS_DIR) not in sys.path:
-    sys.path.insert(0, str(CONTRACTS_DIR))
 
 
 class ModeEnum(str, Enum):

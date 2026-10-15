@@ -1,4 +1,4 @@
-"""Evaluación estructurada con Groq; el porcentaje se calcula en scoring.py."""
+"""Evaluación estructurada con Groq; el porcentaje se calcula en match_scoring.py."""
 from __future__ import annotations
 
 import json
