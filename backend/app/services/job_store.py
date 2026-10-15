@@ -1,42 +1,72 @@
-from uuid import UUID, uuid4
+"""Estado propio de extracción, independiente de AsyncResult de Celery."""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
 from typing import Any
-from app.schemas.cv_analysis import CVAnalysisDetail, CVAnalysisStatus
+
+import redis
+
+from app.core.config import settings
 
 
-jobs: dict[UUID, CVAnalysisDetail] = {}
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-def create_job(candidate_id: int) -> CVAnalysisDetail:
-    job = CVAnalysisDetail(
-        job_id=uuid4(),
-        candidate_id=candidate_id,
-        status=CVAnalysisStatus.queued,
-    )
+class ExtractionJobStore:
+    def __init__(self, client: redis.Redis | None = None) -> None:
+        self.client = client or redis.from_url(settings.JOB_STORE_REDIS_URL, decode_responses=True)
 
-    jobs[job.job_id] = job
+    @staticmethod
+    def _job_key(job_id: str) -> str:
+        return f"ien-extraction:job:{job_id}"
 
-    return job
+    @staticmethod
+    def _idempotency_key(key: str) -> str:
+        return f"ien-extraction:idempotency:{key}"
 
+    def create_or_get(self, key: str, payload_hash: str, payload: dict[str, Any], job_id: str) -> tuple[dict[str, Any], bool]:
+        existing_id = self.client.get(self._idempotency_key(key))
+        if existing_id:
+            job = self.get(existing_id)
+            if job is None:
+                raise RuntimeError("The extraction idempotency mapping is inconsistent.")
+            if job["payload_hash"] != payload_hash:
+                raise ValueError("Idempotency-Key was already used with another payload.")
+            return job, False
+        job = {
+            "job_id": job_id,
+            "idempotency_key": key,
+            "payload_hash": payload_hash,
+            "payload": payload,
+            "status": "accepted",
+            "result": None,
+            "error": None,
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        self.client.set(self._job_key(job_id), json.dumps(job), ex=settings.JOB_TTL_SECONDS, nx=True)
+        if not self.client.set(self._idempotency_key(key), job_id, ex=settings.JOB_TTL_SECONDS, nx=True):
+            return self.create_or_get(key, payload_hash, payload, job_id)
+        return job, True
 
-def get_job(job_id: UUID) -> CVAnalysisDetail | None:
-    return jobs.get(job_id)
+    def get(self, job_id: str) -> dict[str, Any] | None:
+        value = self.client.get(self._job_key(job_id))
+        return json.loads(value) if value else None
 
-def mark_job_processing(job_id: UUID) -> None:
-    job = get_job(job_id)
+    def update(self, job_id: str, **changes: Any) -> dict[str, Any]:
+        job = self.get(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        job.update(changes)
+        job["updated_at"] = _now()
+        self.client.set(self._job_key(job_id), json.dumps(job), ex=settings.JOB_TTL_SECONDS)
+        return job
 
-    if job is not None:
-        job.status = CVAnalysisStatus.processing
+    def acquire_lock(self, job_id: str) -> bool:
+        return bool(self.client.set(f"ien-extraction:lock:{job_id}", "1", nx=True, ex=600))
 
-def mark_job_completed(job_id: UUID, result: dict[str, Any]) -> None:
-    job = get_job(job_id)
-
-    if job is not None:
-        job.status = CVAnalysisStatus.completed
-        job.result = result
-
-def mark_job_failed(job_id: UUID, error: str) -> None:
-    job = get_job(job_id)
-
-    if job is not None:
-        job.status = CVAnalysisStatus.failed
-        job.error = error
+    def release_lock(self, job_id: str) -> None:
+        self.client.delete(f"ien-extraction:lock:{job_id}")

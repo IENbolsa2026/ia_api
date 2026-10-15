@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.tasks.cv_analysis_tasks import analyze_cv_task
+from app.tasks.cv_analysis_tasks import deliver_extraction_result_task
 from app.services.channel_events import publish_cv_analysis_complete
 
 
@@ -20,34 +20,43 @@ class CVNotificationTaskTests(unittest.TestCase):
         })
         layer.close_pools.assert_awaited_once()
 
+    def deliver(self, user_id=9, result=None):
+        job = {'job_id': 'job-1', 'idempotency_key': 'cv-1', 'status': 'completed',
+               'result': result if result is not None else {}, 'error': None,
+               'payload': {'kind': 'candidate_cv', 'analysis_id': 17, 'candidate_id': 4,
+                           'user_id': user_id, 'source_hash': 'a' * 64}}
+        return job
+
+    @patch('app.tasks.cv_analysis_tasks.ExtractionJobStore')
     @patch('app.tasks.cv_analysis_tasks.publish_cv_analysis_complete')
-    @patch('app.tasks.cv_analysis_tasks.notify_cv_result')
-    def test_completed_task_publishes_after_callback(self, notify, publish):
-        result = analyze_cv_task.apply(kwargs={
-            'analysis_id': 17,
-            'candidate_id': 4,
-            'user_id': 9,
-            'cv_pdf_base64': '',
-            'analysis_result': {'habilidades_analizadas': []},
-        })
+    @patch('app.tasks.cv_analysis_tasks.notify_extraction_result')
+    def test_completed_task_publishes_after_callback(self, notify, publish, store):
+        store.return_value.get.return_value = self.deliver()
+        events = []
+        notify.side_effect = lambda payload: events.append(('callback', payload['status']))
+        publish.side_effect = lambda *args: events.append(('notification', args))
+        deliver_extraction_result_task.run('job-1')
+        self.assertEqual(events, [('callback', 'completed'), ('notification', (9, 17, 'completado'))])
 
-        self.assertTrue(result.successful())
-        self.assertEqual(notify.call_args.args[0]['status'], 'completed')
-        publish.assert_called_once_with(9, 17, 'completado')
-
+    @patch('app.tasks.cv_analysis_tasks.ExtractionJobStore')
     @patch('app.tasks.cv_analysis_tasks.publish_cv_analysis_complete')
-    @patch('app.tasks.cv_analysis_tasks.notify_cv_result')
-    def test_legacy_client_without_user_id_keeps_callback(self, notify, publish):
-        result = analyze_cv_task.apply(kwargs={
-            'analysis_id': 17,
-            'candidate_id': 4,
-            'cv_pdf_base64': '',
-            'analysis_result': {},
-        })
-
-        self.assertTrue(result.successful())
+    @patch('app.tasks.cv_analysis_tasks.notify_extraction_result')
+    def test_client_without_user_id_keeps_callback(self, notify, publish, store):
+        store.return_value.get.return_value = self.deliver(user_id=None)
+        deliver_extraction_result_task.run('job-1')
         notify.assert_called_once()
         publish.assert_not_called()
+
+    @patch('app.tasks.cv_analysis_tasks.ExtractionJobStore')
+    @patch('app.tasks.cv_analysis_tasks.publish_cv_analysis_complete')
+    @patch('app.tasks.cv_analysis_tasks.notify_extraction_result')
+    def test_failed_delivery_retry_preserves_failed_status(self, notify, publish, store):
+        job = self.deliver()
+        job.update(status='delivery_failed', result=None)
+        store.return_value.get.return_value = job
+        deliver_extraction_result_task.run('job-1')
+        self.assertEqual(notify.call_args.args[0]['status'], 'failed')
+        publish.assert_called_once_with(9, 17, 'error')
 
 
 if __name__ == '__main__':

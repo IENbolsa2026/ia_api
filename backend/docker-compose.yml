@@ -3,6 +3,7 @@ services:
   # mensajero entre FastAPI y Celery, y conserva el estado temporal de tareas.
   redis:
     image: redis:7-alpine
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
     volumes:

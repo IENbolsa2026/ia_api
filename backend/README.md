@@ -235,3 +235,12 @@ respuesta se haya perdido.
   del servicio Docker correspondiente en las URLs.
 - No uses `BackgroundTasks` para este trabajo: corre dentro del mismo proceso
   web, se pierde al reiniciar y no ofrece una cola durable ni reintentos.
+# Rama ia-match
+
+Integra la extracción idempotente de `ia-aplicada` con el aviso de Benja.
+Expone `POST /api/v1/cv-analyses`, `/offer-analyses` y `/profile-normalizations`
+autenticados por Bearer token. El callback firmado guarda perfiles versionados
+en Django; después se publica la notificación Redis para `user_<user_id>`.
+
+El porcentaje se calcula con Groq en `C:\IEN\jev-match-api`. Para iniciar la pila:
+`C:\IEN\repositorio\BolsaTrabajo\scripts\start_ia_match.ps1`.

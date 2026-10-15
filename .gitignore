@@ -1,0 +1,6 @@
+# Configuración y datos locales de desarrollo.
+backend/.env
+backend/.venv/
+backend/redis-data/
+__pycache__/
+*.py[cod]
