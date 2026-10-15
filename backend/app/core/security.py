@@ -7,6 +7,14 @@ from fastapi import Header, HTTPException, status
 from .config import settings
 
 
+def bearer_token(value: str | None) -> str | None:
+    return _token_from_header(value)
+
+
+def is_valid_service_token(value: str | None) -> bool:
+    return bool(settings.SERVICE_API_TOKEN and value and hmac.compare_digest(value, settings.SERVICE_API_TOKEN))
+
+
 def _token_from_header(value: str | None) -> str | None:
     if not value or not value.startswith("Bearer "):
         return None

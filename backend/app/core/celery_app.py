@@ -19,7 +19,7 @@ celery_app = Celery(
 celery_app.conf.update(
     # Registra las tareas de forma explicita. Asi Celery sabe que modulos debe
     # importar cuando el worker inicia.
-    include=["app.tasks.cv_analysis_tasks"],
+    include=["app.tasks.cv_analysis_tasks", "app.tasks.match_tasks"],
     # Permite mostrar STARTED en el endpoint GET, no solo PENDING y SUCCESS.
     task_track_started=True,
     # JSON es portable entre Redis y evita serializar objetos Python arbitrarios.

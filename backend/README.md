@@ -242,5 +242,22 @@ Expone `POST /api/v1/cv-analyses`, `/offer-analyses` y `/profile-normalizations`
 autenticados por Bearer token. El callback firmado guarda perfiles versionados
 en Django; después se publica la notificación Redis para `user_<user_id>`.
 
-El porcentaje se calcula con Groq en `C:\IEN\jev-match-api`. Para iniciar la pila:
+El porcentaje se calcula con Groq dentro de esta misma API. CV, ofertas, normalización y compatibilidad comparten servidor en 8001, token de servicio y worker Celery. Para iniciar la pila:
 `C:\IEN\repositorio\BolsaTrabajo\scripts\start_ia_match.ps1`.
+
+## API única: CV y compatibilidad
+
+La rama `ia-match` sirve todas las operaciones desde `app.main:app`, puerto 8001.
+
+- `POST /api/v1/cv-analyses`: analiza un CV.
+- `POST /api/v1/offer-analyses`: estructura una oferta.
+- `POST /api/v1/profile-normalizations`: normaliza un perfil.
+- `POST /api/v1/matches`: inicia una comparación.
+- `GET /api/v1/matches/{request_id}`: recupera su estado y porcentaje.
+- WebSocket `/api/v1/ws/v1/matches`: inicia o retoma una comparación desde Django.
+
+Las rutas de análisis y comparación usan el mismo `SERVICE_API_TOKEN`. El worker
+`celery -A app.core.celery_app.celery_app worker --pool=solo` procesa ambas clases
+de trabajo. `MATCH_GROQ_MODEL` permite elegir otro modelo para compatibilidad;
+si se omite usa `CV_MODEL`. El limitador Redis de Groq se comparte con extracción.
+El puerto 8002 y el paquete `jev_match_api` ya no forman parte del arranque.

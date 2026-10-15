@@ -49,6 +49,8 @@ class Settings(BaseSettings, extra="ignore"):
     GROQ_REQUESTS_PER_MINUTE: int = 20
     CV_MAX_PDF_BYTES: int = 5 * 1024 * 1024
     SERVICE_API_TOKEN: str = ""
+    MATCH_GROQ_MODEL: str = ""
+    MATCH_REDIS_URL: str = "redis://localhost:6379/4"
     JOB_STORE_REDIS_URL: str = "redis://localhost:6379/2"
     JOB_TTL_SECONDS: int = 60 * 60 * 24 * 30
 
