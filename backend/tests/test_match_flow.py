@@ -1,7 +1,6 @@
 """Flujo WebSocket → worker → puntuación con un proveedor simulado."""
 import unittest
 from copy import deepcopy
-from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -29,6 +28,9 @@ class MemoryStore:
     def update(self, key, **changes):
         self.jobs[key].update(changes)
 
+    def update_owned(self, key, **changes):
+        self.update(key, **changes)
+
     def acquire_lock(self, key):
         return True
 
@@ -54,10 +56,8 @@ class MatchFlowTests(unittest.TestCase):
         with patch.object(settings, 'SERVICE_API_TOKEN', 'test-service'), \
              patch('app.api.v1.endpoints.matches.MatchJobStore', return_value=store), \
              patch('app.tasks.match_tasks.MatchJobStore', return_value=store), \
-             patch('app.tasks.match_tasks.RedisRateLimiter') as limiter, \
              patch('app.tasks.match_tasks.GroqClient') as provider, \
              patch('app.api.v1.endpoints.matches.celery_app.send_task') as send:
-            limiter.return_value.reserve.return_value = SimpleNamespace(granted=True)
             provider.return_value.evaluate.return_value = {'answers': answers}
             send.side_effect = lambda name, args, **kwargs: evaluate_match_task.run(*args)
             with TestClient(app) as client:
@@ -70,6 +70,10 @@ class MatchFlowTests(unittest.TestCase):
                     completed = socket.receive_json()
                     self.assertEqual(completed['result']['match_percentage'], 75)
                     self.assertEqual(completed['result']['assessments'][0]['status'], 'met')
+                    socket.send_json({'type': 'match.resume', 'request_id': request_id})
+                    resumed = socket.receive_json()
+                    self.assertEqual(resumed['type'], 'match.completed')
+                    self.assertEqual(resumed['result'], completed['result'])
                 recovered = client.get(f'/api/v1/matches/{request_id}', headers={'Authorization': 'Bearer test-service'})
                 self.assertEqual(recovered.json()['result']['match_percentage'], 75)
                 duplicate = client.post('/api/v1/matches', json=request, headers={'Authorization': 'Bearer test-service'})

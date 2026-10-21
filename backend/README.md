@@ -1,15 +1,73 @@
 # Microservicio de analisis de CVs
 
-Este proyecto recibe un PDF, extrae su texto y lo analiza con Groq en segundo plano; luego
-envia el resultado JSON a otra aplicacion mediante un callback HTTP.
+## Formatos de carga y límites
+
+`POST /api/v1/cv-analyses` acepta el campo multipart `cv` con PDF, DOCX, ODT o
+TXT (UTF-8/Windows-1252), hasta 5 MiB. DOC/RTF solo están habilitados cuando
+Docker y una imagen conversora aislada están configurados. Consulta
+`GET /api/v1/cv-analyses/capabilities` antes de mostrar formatos al usuario.
+La detección valida firma y estructura; no confía en el MIME enviado por el
+cliente. El límite actual es 20 páginas PDF, 50 MiB descomprimidos para Office
+y 100.000 caracteres de texto. No se trunca contenido. El OCR queda fuera de
+alcance.
+
+El análisis del CV usa `cv-extraction.v2-packets-soft.v2` y mantiene el perfil ampliado
+`candidate-profile.v2`. Divide el texto en paquetes de hasta
+`CV_PACKET_CHARACTERS` (500 por defecto, limitado por `CV_BLOQUE_CARACTERES`).
+Cada llamada utiliza `CV_EXTRACTION_MAX_TOKENS` (950 por defecto). Si una salida
+se trunca, solo ese paquete se divide, preservando todo el texto.
+
+El manifiesto y los avances viven dentro del trabajo Redis identificado por su
+UUID. La identidad incluye análisis, postulante, versión del CV, hash del archivo,
+hash del texto, prompt, proveedor/modelo y configuración. Cada paquete tiene su
+propio identificador, rango y hash; un checkpoint de otro trabajo se rechaza.
+Los resultados se validan contra el subtexto de su paquete antes de guardarlos.
+Los paquetes terminados se reutilizan al reanudar, sin enviarlos otra vez.
+
+La consolidación con IA devuelve grupos de identificadores; el servidor conserva
+las evidencias ya extraídas. Solo se publica el perfil cuando están completas
+todas las hojas y su cobertura corresponde al texto íntegro del mismo CV.
+Si un grupo propuesto combina hechos incompatibles, se conservan como hechos
+individuales después de validar que todos los identificadores estén presentes
+exactamente una vez. El plan efectivo final queda guardado y validado para
+evitar repetirlo tras una interrupción. Las escrituras requieren el propietario vigente del bloqueo.
+El limitador de cuota es global; los datos y resultados de los CV son por trabajo.
+
+Las claves abreviadas se usan solo en el transporte con el modelo. El formato
+almacenado por Django y el que recibe el match conserva su contrato. Las llamadas
+de ofertas, normalización y match mantienen sus presupuestos actuales.
+Las pausas por cuota pueden demorar varios minutos. Una salida incompleta nunca
+se presenta como un perfil completo. Los logs solo incluyen etapas, IDs y
+cantidades; no registran texto ni citas del CV.
+
+La conversión opcional de DOC/RTF se instala desde `backend` con:
+
+```powershell
+docker build -f docker/cv-converter.Dockerfile -t ien-cv-converter:local .
+```
+
+Configura `CV_LEGACY_CONVERTER_IMAGE=ien-cv-converter:local`. El runner usa
+contenedor sin red, usuario no privilegiado, filesystem de solo lectura,
+límites de memoria/CPU/procesos y timeout. Si no se configura, la API no anuncia
+ni acepta esos formatos.
+
+La extracción PDF/DOCX/ODT corre en un proceso separado con timeout y memoria
+limitada. En producción, `CV_SCAN_ENABLED=true` y `CV_SCAN_COMMAND` deben
+apuntar a un escáner existente; sin escaneo obligatorio la aplicación no inicia.
+En desarrollo con escaneo deshabilitado la capacidad lo informa y no se declara
+el archivo como seguro. Un error del escáner rechaza la carga.
+
+Este proyecto recibe CVs en formatos habilitados, extrae su texto y lo analiza
+en segundo plano; luego envia el resultado JSON a otra aplicacion mediante un
+callback HTTP.
 
 ## Que ocurre cuando llega un CV
 
 ```text
 Aplicacion origen
-   | POST /api/v1/cv-analyses (PDF + IDs, multipart/form-data)
+   | POST /api/v1/cv-analyses (archivo + IDs, multipart/form-data)
    v
-FastAPI valida el PDF y publica una tarea en Redis
+FastAPI valida el archivo y publica una tarea en Redis
    | responde 202 { job_id, status: "queued" }
    v
 Worker Celery toma la tarea y consulta Groq
@@ -37,15 +95,16 @@ app/
   services/result_notifier.py     Hace POST del resultado al otro sistema.
 ```
 
-Los archivos antiguos `services/job_store.py` y `services/cv_analysis_runner.py`
-ya no participan del flujo. Se dejaron como referencia del enfoque anterior de
-tareas en memoria; pueden eliminarse cuando confirmes que Celery funciona.
+`services/job_store.py` conserva el registro recuperable e idempotente de
+extracciones y sí participa del flujo actual. El almacenamiento de artefactos
+privados y el proceso de extracción están en `cv_artifacts.py` y
+`document_extractor_runner.py`.
 
 ## Ejecutar la pila completa en local
 
 La integración necesita este microservicio, la aplicación Django de
 `repositorio/BolsaTrabajo`, Redis y un worker de Celery. Los pasos siguientes
-parten de clones nuevos de ambos repositorios. Requieren Python 3.12, Docker y
+parten de clones nuevos de ambos repositorios. Requieren Python 3.11 para la API, Docker y
 Docker Compose.
 
 ### 1. Preparar este microservicio
@@ -136,7 +195,7 @@ curl http://127.0.0.1:8001/
 curl -I http://127.0.0.1:8000/
 ```
 
-FastAPI debe responder `{"message":"CV analyzer API is running"}`; Django,
+FastAPI debe responder `{"message":"La API de análisis de CV está disponible."}`; Django,
 un `200`. El worker debe mostrar `celery@... ready.`.
 
 ## Contrato HTTP de entrada
@@ -147,10 +206,10 @@ un `200`. El worker debe mostrar `celery@... ready.`.
 | --- | --- | --- |
 | `analysis_id` | entero | ID de la solicitud creada por Django. |
 | `candidate_id` | entero | ID del postulante. |
-| `cv` | archivo PDF | CV de hasta 5 MB. |
+| `cv` | archivo | PDF, DOCX, ODT o TXT; DOC/RTF si están habilitados; máximo 5 MiB. |
 
 FastAPI devuelve la respuesta antes de extraer el texto. El worker de Celery
-extrae el PDF y realiza el análisis con Groq en segundo plano.
+extrae el texto y realiza el análisis con Groq en segundo plano.
 
 Respuesta inmediata (`202 Accepted`):
 
@@ -162,8 +221,8 @@ Respuesta inmediata (`202 Accepted`):
 ```
 
 `analysis_id` y `candidate_id` deben ser mayores a cero; el archivo debe ser un
-PDF no vacío de hasta 5 MB. Si no se cumplen estas condiciones, FastAPI responde
-con un error `4xx` explicando el campo inválido.
+archivo admitido, no vacío y de hasta 5 MiB. FastAPI responde en español con un
+error `4xx` si no se cumplen estas condiciones.
 
 ## Consultar estado
 
@@ -262,15 +321,33 @@ de trabajo. `MATCH_GROQ_MODEL` permite elegir otro modelo para compatibilidad;
 si se omite usa `CV_MODEL`. El limitador Redis de Groq se comparte con extracción.
 El puerto 8002 y el paquete `jev_match_api` ya no forman parte del arranque.
 
-## Prompt y cálculo de compatibilidad
+## Prompt y cálculo de compatibilidad v2
 
-- `app/prompts/match-rubric.v1.md`: reglas de evidencia y evaluación de perfiles.
-- `app/services/match_groq.py`, método `GroqClient.evaluate`: prompt de sistema,
-  esquema JSON y llamada a Groq. La IA devuelve cuatro puntajes de 0 a 4.
-- `app/services/match_scoring.py`: preguntas, pesos y fórmula del porcentaje.
-  `build_result` combina habilidades (45%), experiencia (25%), formación e idiomas
-  (15%) y preferencias (15%). Aplica un máximo de 40% si un requisito excluyente
-  no tiene respaldo. El porcentaje se calcula en Python, no lo inventa el prompt.
+- `app/prompts/cv_extraction.v2.blocks.compact.system.md` y `cv_consolidation.v2.refs.system.md` y `offer_extraction.v2.system.md`
+  estructuran CV y ofertas de cualquier rubro con textos visibles en español.
+  Las habilidades conservan evidencia y citas del documento original.
+- `GroqClient.evaluate_v2` devuelve un juicio por identificador de requisito.
+  El servidor valida las referencias de evidencia y conserva la clasificación
+  obligatorio/deseable confirmada en Django.
+- `app/services/match_scoring.py` calcula en Python el total y el desglose a
+  partir de esos juicios. Los porcentajes llegan en `scoring_config` desde una
+  configuración publicada de Django admin; no los decide el modelo.
+- Las siete dimensiones son competencias técnicas, habilidades blandas,
+  experiencia, formación/certificaciones, idiomas, disponibilidad/modalidad y
+  deseables. La configuración debe sumar exactamente 10.000 centésimas de
+  porcentaje (100%). Los valores iniciales son 35/15/20/10/5/5/10.
+- Una dimensión sin requisitos no aporta puntos gratuitos: se redistribuyen
+  proporcionalmente los pesos aplicables. La ausencia de evidencia de un
+  requisito solicitado permanece como `unknown` y puntúa cero en el encaje
+  acreditado, diferenciada de un incumplimiento explícito.
+- El estado de obligatorios se informa por separado. La rúbrica v2 no aplica
+  el antiguo techo fijo de 40%. El circuito v1 se conserva para compatibilidad
+  de lectura y trabajos anteriores, no para nuevas solicitudes de Django.
+- Se envía el perfil una sola vez y un catálogo de referencias; el presupuesto
+  de respuesta se ajusta a la cantidad de requisitos. Los errores 429 respetan
+  `Retry-After` y reprograman el trabajo sin repetir llamadas inmediatamente.
 
 El paquete `ien_contracts/` se incluye en el repositorio. No requiere la carpeta
-externa `C:\IEN\contracts`. Mantener sus modelos v1 sincronizados con Django.
+externa `C:\IEN\contracts`. Mantener sus modelos y el helper de límites de
+procesos sincronizados con Django. Los nuevos pedidos usan `match.v2`, incluyen
+la fecha de evaluación y guardan configuración, modelo y versiones utilizados.

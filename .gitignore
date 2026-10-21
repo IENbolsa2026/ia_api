@@ -2,5 +2,7 @@
 backend/.env
 backend/.venv/
 backend/redis-data/
+backend/private_cv_artifacts/
+*.log
 __pycache__/
 *.py[cod]

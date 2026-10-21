@@ -22,6 +22,10 @@ celery_app.conf.update(
     include=["app.tasks.cv_analysis_tasks", "app.tasks.match_tasks"],
     # Permite mostrar STARTED en el endpoint GET, no solo PENDING y SUCCESS.
     task_track_started=True,
+    # Los jobs se guardan antes de encolarse y sus workers son idempotentes.
+    # Con ACK temprano, una caída del proceso perdería una extracción en curso.
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
     # JSON es portable entre Redis y evita serializar objetos Python arbitrarios.
     task_serializer="json",
     result_serializer="json",

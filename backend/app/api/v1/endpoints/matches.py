@@ -17,9 +17,17 @@ router = APIRouter()
 
 def start(request: MatchRequest) -> dict:
     store = MatchJobStore()
-    job, created = store.create_or_get(request.model_dump(mode="json"))
+    try:
+        job, created = store.create_or_get(request.model_dump(mode="json"))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="El identificador de solicitud ya se usó con otros datos.") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="El servicio de compatibilidad no está disponible.") from exc
     if created or job['status'] == 'accepted':
-        celery_app.send_task(evaluate_match_task.name, args=[str(request.request_id)], task_id=f"match-{request.request_id}")
+        try:
+            celery_app.send_task(evaluate_match_task.name, args=[str(request.request_id)], task_id=f"match-{request.request_id}")
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="No se pudo encolar la compatibilidad. Volvé a intentarlo con la misma solicitud.") from exc
     return {"request_id": str(request.request_id), "status": job["status"], "created": created}
 
 
@@ -33,8 +41,15 @@ def create_match(request: MatchRequest, _: None = Depends(require_service_token)
 async def get_match(request_id: str, _: None = Depends(require_service_token)) -> dict:
     job = MatchJobStore().get(request_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Match request not found.")
-    return {key: value for key, value in job.items() if key not in {"request_hash"}}
+        raise HTTPException(status_code=404, detail="No se encontró la solicitud de compatibilidad.")
+    return {
+        "request_id": job.get("request_id", request_id),
+        "status": job["status"],
+        "result": job.get("result"),
+        "error": job.get("error"),
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+    }
 
 
 @router.websocket("/ws/v1/matches")
@@ -69,14 +84,19 @@ async def match_socket(websocket: WebSocket) -> None:
                 continue
             if event_type == "match.resume":
                 request_id = str(message.get("request_id", ""))
+                last_status = None
                 if not MatchJobStore().get(request_id):
-                    await websocket.send_json({"type": "match.failed", "error": "Match request not found."})
+                    await websocket.send_json({"type": "match.failed", "error": "No se encontró la solicitud de compatibilidad."})
                     request_id = None
                 continue
             if event_type != "match.start":
-                await websocket.send_json({"type": "match.failed", "error": "Unsupported event type."})
+                await websocket.send_json({"type": "match.failed", "error": "El tipo de evento no está admitido."})
                 continue
-            request = MatchRequest.model_validate(message.get("payload"))
+            try:
+                request = MatchRequest.model_validate(message.get("payload"))
+            except Exception:
+                await websocket.send_json({"type": "match.failed", "error": "La solicitud de compatibilidad no es válida."})
+                continue
             started = start(request)
             request_id = started["request_id"]
             last_status = None

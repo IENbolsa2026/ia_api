@@ -9,6 +9,11 @@ from app.services.match_groq import GroqClient, GroqError
 
 
 class GroqClientTests(unittest.TestCase):
+    def setUp(self):
+        limiter = patch('app.services.match_groq.groq_rate_limiter')
+        self.limiter = limiter.start().return_value
+        self.addCleanup(limiter.stop)
+
     @patch.object(settings, 'GROQ_API_KEY', 'synthetic-key')
     @patch('app.services.match_groq.httpx.post')
     def test_validates_json_and_uses_groq_endpoint(self, post):
@@ -31,7 +36,7 @@ class GroqClientTests(unittest.TestCase):
     @patch.object(settings, 'GROQ_API_KEY', 'synthetic-key')
     @patch('app.services.match_groq.httpx.post')
     def test_provider_error_does_not_expose_response_body(self, post):
-        post.return_value = httpx.Response(429, text='private content')
-        with self.assertRaisesRegex(GroqError, 'HTTP 429') as error:
+        post.return_value = httpx.Response(500, text='private content')
+        with self.assertRaisesRegex(GroqError, 'HTTP 500') as error:
             GroqClient().evaluate({}, {})
         self.assertNotIn('private content', str(error.exception))

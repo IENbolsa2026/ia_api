@@ -1,0 +1,248 @@
+"""Compact named-alias transport for CV extraction calls only."""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from ien_contracts.models import (
+    CandidateProfile,
+    SkillKind,
+    SkillLevel,
+    SkillOrigin,
+    WorkMode,
+)
+
+
+logger = logging.getLogger(__name__)
+_SAFE_SCHEMA_PATH_PARTS = {
+    "v", "id", "h", "s", "sk", "x", "ed", "l", "p", "c",
+    "n", "k", "o", "y", "e", "q", "ci", "t", "m", "f", "i", "d", "w",
+}
+
+
+class _WireModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class WireSkill(_WireModel):
+    name: str = Field(min_length=1, max_length=100, alias="n")
+    kind: SkillKind = Field(default=SkillKind.unknown, alias="k")
+    level: SkillLevel = Field(default=SkillLevel.unknown, alias="l")
+    origin: SkillOrigin = Field(default=SkillOrigin.declared, alias="o")
+    years_experience: float | None = Field(default=None, ge=0, le=80, alias="y")
+    evidence: list[str] = Field(default_factory=list, max_length=8, alias="e")
+    source_quotes: list[str] = Field(default_factory=list, max_length=8, alias="q")
+    concept_id: str | None = Field(default=None, max_length=120, alias="ci")
+
+    @field_validator("evidence", "source_quotes", mode="before")
+    @classmethod
+    def accept_one_transport_string(cls, value):
+        return [value] if isinstance(value, str) else value
+
+
+class WireExperience(_WireModel):
+    job_title: str = Field(min_length=1, max_length=160, alias="t")
+    organization: str | None = Field(default=None, max_length=160, alias="o")
+    duration_months: int | None = Field(default=None, ge=0, le=960, alias="m")
+    highlights: list[str] = Field(default_factory=list, max_length=8, alias="h")
+
+
+class WireEducation(_WireModel):
+    level: Literal["secondary", "technical", "bachelor", "master", "doctorate", "other", "unknown"] = Field(alias="l")
+    field: str | None = Field(default=None, max_length=160, alias="f")
+    institution: str | None = Field(default=None, max_length=160, alias="i")
+    completed: bool | None = Field(default=None, alias="c")
+
+
+class WireLanguage(_WireModel):
+    name: str = Field(min_length=1, max_length=80, alias="n")
+    level: Literal["basic", "conversational", "professional", "native", "unknown"] = Field(default="unknown", alias="l")
+
+
+class WirePreferences(_WireModel):
+    locations: list[str] = Field(default_factory=list, max_length=10, alias="l")
+    work_modes: list[WorkMode] = Field(default_factory=list, max_length=3, alias="w")
+
+
+class WireCredential(_WireModel):
+    name: str = Field(min_length=1, max_length=160, alias="n")
+    issuer: str | None = Field(default=None, max_length=160, alias="i")
+    issued_at: str | None = Field(default=None, max_length=40, alias="d")
+    expires_at: str | None = Field(default=None, max_length=40, alias="x")
+    evidence: list[str] = Field(default_factory=list, max_length=8, alias="e")
+    source_quotes: list[str] = Field(default_factory=list, max_length=8, alias="q")
+    origin: Literal["declared", "user_declared"] = Field(default="declared", alias="o")
+
+    @field_validator("evidence", "source_quotes", mode="before")
+    @classmethod
+    def accept_one_transport_string(cls, value):
+        return [value] if isinstance(value, str) else value
+
+
+class _WireProfileFields(_WireModel):
+    headline: str | None = Field(default=None, max_length=180, alias="h")
+    summary: str | None = Field(default=None, max_length=2000, alias="s")
+    skills: list[WireSkill] = Field(default_factory=list, max_length=100, alias="sk")
+    work_experience: list[WireExperience] = Field(default_factory=list, max_length=50, alias="x")
+    education: list[WireEducation] = Field(default_factory=list, max_length=20, alias="ed")
+    languages: list[WireLanguage] = Field(default_factory=list, max_length=20, alias="l")
+    preferences: WirePreferences = Field(default_factory=WirePreferences, alias="p")
+    credentials: list[WireCredential] = Field(default_factory=list, max_length=50, alias="c")
+
+
+class WireFragment(_WireProfileFields):
+    """A block result. Identity is supplied only by the server at consolidation."""
+
+    summary: str | None = Field(default=None, max_length=500, alias="s")
+
+
+class WireProfile(_WireProfileFields):
+    schema_version: Literal["candidate-profile.v2"] = Field(alias="v")
+    profile_id: str = Field(min_length=1, max_length=64, alias="id")
+
+
+def _dump_wire(value: _WireProfileFields) -> dict:
+    return value.model_dump(mode="json", by_alias=True, exclude_defaults=True)
+
+
+def validate_fragment(raw: dict, source_block: str) -> tuple[dict, dict]:
+    """Validate an aliased fragment and return expanded and compact forms."""
+    try:
+        fragment = WireFragment.model_validate(raw)
+    except ValidationError as exc:
+        details = []
+        for error in exc.errors(include_input=False, include_context=False, include_url=False):
+            loc = error.get("loc", ())
+            if all(
+                (isinstance(part, int) and part >= 0)
+                or (isinstance(part, str) and part in _SAFE_SCHEMA_PATH_PARTS)
+                for part in loc
+            ):
+                path = ".".join(str(part) for part in loc) or "?"
+            else:
+                path = "?"
+            error_type = error.get("type", "unknown")
+            safe_type = error_type if isinstance(error_type, str) and re.fullmatch(r"[a-z0-9_]+", error_type) else "unknown"
+            details.append({"path": path, "type": safe_type})
+        logger.warning("CV fragment schema validation failed: %s", details[:20])
+        raise ValueError("El proveedor devolvió un fragmento compacto de CV inválido.") from None
+    expanded = fragment.model_dump(mode="python")
+    _validate_profile_evidence(expanded, source_block)
+    return expanded, _dump_wire(fragment)
+
+
+def expand_profile(raw: dict, source_text: str, candidate_id: int) -> dict:
+    """Expand a strict compact profile into the existing candidate-profile.v2 contract."""
+    try:
+        wire = WireProfile.model_validate(raw)
+    except ValidationError as exc:
+        raise ValueError("El proveedor devolvió un perfil compacto de CV inválido.") from exc
+    if wire.schema_version != "candidate-profile.v2":
+        raise ValueError("El perfil compacto devolvió una versión incompatible.")
+    if wire.profile_id != str(candidate_id):
+        raise ValueError("El perfil consolidado devolvió una identidad de candidato incorrecta.")
+    profile = wire.model_dump(mode="python")
+    profile["rejected_skills"] = []
+    try:
+        validated = CandidateProfile.model_validate(profile)
+    except ValidationError as exc:
+        raise ValueError("El perfil consolidado no cumple el contrato candidate-profile.v2.") from exc
+    expanded = validated.model_dump(mode="json")
+    _validate_profile_evidence(expanded, source_text)
+    return expanded
+
+
+def validate_expanded_profile(profile: dict, source_text: str, candidate_id: int) -> dict:
+    """Validate a server-assembled candidate-profile.v2 without changing its facts."""
+    try:
+        validated = CandidateProfile.model_validate(profile)
+    except ValidationError as exc:
+        raise ValueError("El perfil ensamblado no cumple el contrato candidate-profile.v2.") from exc
+    if validated.schema_version != "candidate-profile.v2" or validated.profile_id != str(candidate_id):
+        raise ValueError("El perfil ensamblado devolvió una identidad o versión incompatible.")
+    expanded = validated.model_dump(mode="json")
+    _validate_profile_evidence(expanded, source_text)
+    return expanded
+
+
+def _validate_profile_evidence(profile: dict, source_text: str) -> None:
+    source = " ".join(source_text.split()).casefold()
+    for skill in profile.get("skills", []):
+        if skill.get("origin") == "user_declared":
+            raise ValueError("La extracción automática no puede crear habilidades declaradas por el usuario.")
+        evidence = skill.get("evidence", [])
+        quotes = skill.get("source_quotes", [])
+        if not evidence or not quotes:
+            raise ValueError("Cada habilidad de CV v2 debe incluir evidencia y citas del CV.")
+        if any(not item.strip() or len(item) > 160 for item in evidence):
+            raise ValueError("La evidencia de una habilidad debe ser breve y no vacía.")
+        if any(not quote.strip() or len(quote) > 160 or " ".join(quote.split()).casefold() not in source for quote in quotes):
+            raise ValueError("Una habilidad contiene citas que no aparecen en el CV original.")
+    for credential in profile.get("credentials", []):
+        evidence = credential.get("evidence", [])
+        quotes = credential.get("source_quotes", [])
+        if credential.get("origin") == "user_declared" or not evidence or not quotes:
+            raise ValueError("Cada credencial extraída debe incluir evidencia y citas del CV original.")
+        if any(not item.strip() or len(item) > 160 for item in evidence):
+            raise ValueError("La evidencia de una credencial debe ser breve y no vacía.")
+        if any(not quote.strip() or len(quote) > 160 or " ".join(quote.split()).casefold() not in source for quote in quotes):
+            raise ValueError("Una credencial contiene citas que no aparecen en el CV original.")
+    for experience in profile.get("work_experience", []):
+        if any(not highlight.strip() or len(highlight) > 160 for highlight in experience.get("highlights", [])):
+            raise ValueError("Los aspectos destacados deben ser breves y no vacíos.")
+
+
+def fragment_schema() -> dict:
+    return WireFragment.model_json_schema(by_alias=True)
+
+
+def profile_schema() -> dict:
+    return WireProfile.model_json_schema(by_alias=True)
+
+
+def contract_profile_to_wire(profile: dict) -> dict:
+    """Compact an existing profile without changing or dropping facts."""
+    try:
+        validated = CandidateProfile.model_validate(profile)
+    except ValidationError as exc:
+        raise ValueError("No se pudo compactar un perfil candidate-profile.v2 válido.") from exc
+    if validated.schema_version != "candidate-profile.v2":
+        raise ValueError("Solo se pueden compactar perfiles candidate-profile.v2.")
+    if validated.rejected_skills:
+        raise ValueError("El transporte compacto no admite habilidades rechazadas.")
+    expanded = validated.model_dump(mode="json")
+    def aliases(rows: list[dict], fields: dict[str, str]) -> list[dict]:
+        return [{alias: row[key] for key, alias in fields.items() if key in row} for row in rows]
+
+    preferences = expanded.get("preferences") or {}
+    wire_input = {
+            "v": expanded["schema_version"],
+            "id": expanded["profile_id"],
+            "h": expanded.get("headline"),
+            "s": expanded.get("summary"),
+            "sk": aliases(expanded.get("skills", []), {
+                "name": "n", "kind": "k", "level": "l", "origin": "o",
+                "years_experience": "y", "evidence": "e", "source_quotes": "q", "concept_id": "ci",
+            }),
+            "x": aliases(expanded.get("work_experience", []), {
+                "job_title": "t", "organization": "o", "duration_months": "m", "highlights": "h",
+            }),
+            "ed": aliases(expanded.get("education", []), {
+                "level": "l", "field": "f", "institution": "i", "completed": "c",
+            }),
+            "l": aliases(expanded.get("languages", []), {"name": "n", "level": "l"}),
+            "p": {"l": preferences.get("locations", []), "w": preferences.get("work_modes", [])},
+            "c": aliases(expanded.get("credentials", []), {
+                "name": "n", "issuer": "i", "issued_at": "d", "expires_at": "x",
+                "evidence": "e", "source_quotes": "q", "origin": "o",
+            }),
+        }
+    try:
+        wire = WireProfile.model_validate(wire_input)
+    except ValidationError as exc:
+        raise ValueError("No se pudo compactar un perfil candidate-profile.v2 válido.") from exc
+    return _dump_wire(wire)

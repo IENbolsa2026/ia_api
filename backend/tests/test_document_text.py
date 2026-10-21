@@ -1,0 +1,87 @@
+import io
+import unittest
+import subprocess
+import zipfile
+from unittest.mock import patch
+from types import SimpleNamespace
+
+from app.core.config import settings
+from app.services.document_text import (
+    DocumentRejected,
+    detect_format,
+    extract_document_text,
+)
+
+
+def office_zip(entries):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, value in entries.items():
+            archive.writestr(name, value)
+    return buffer.getvalue()
+
+
+class DocumentTextTests(unittest.TestCase):
+    def test_txt_accepts_utf8_and_windows_1252(self):
+        self.assertEqual(detect_format("cv.txt", "Experiencia en logística".encode()), "txt")
+        cp = "Experiencia en logística".encode("cp1252")
+        self.assertEqual(extract_document_text(cp, "txt"), "Experiencia en logística")
+
+    def test_docx_hyperlinks_are_inert_but_external_templates_are_rejected(self):
+        document = '<w:document xmlns:w="w"><w:body><w:p><w:r><w:t>LinkedIn</w:t></w:r></w:p></w:body></w:document>'
+        hyperlink_rel = '<Relationships xmlns="r"><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" TargetMode="External" Target="https://example.invalid"/></Relationships>'
+        external_template = '<Relationships xmlns="r"><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/attachedTemplate" TargetMode="External" Target="https://example.invalid/template.dotx"/></Relationships>'
+        normal = office_zip({"[Content_Types].xml": "<Types/>", "word/document.xml": document, "word/_rels/document.xml.rels": hyperlink_rel})
+        self.assertIn("LinkedIn", extract_document_text(normal, "docx"))
+        malicious = office_zip({"[Content_Types].xml": "<Types/>", "word/document.xml": document, "word/_rels/document.xml.rels": external_template})
+        with self.assertRaises(DocumentRejected):
+            extract_document_text(malicious, "docx")
+
+    def test_docx_dtd_and_archive_limits_are_rejected(self):
+        malicious = office_zip({"[Content_Types].xml": "<Types/>", "word/document.xml": '<!DOCTYPE x [<!ENTITY e "bad">]><x>&e;</x>'})
+        with self.assertRaises(DocumentRejected):
+            extract_document_text(malicious, "docx")
+
+    def test_doc_and_rtf_are_only_detected_with_configured_converter(self):
+        with patch("app.services.document_text.legacy_converter_available", return_value=False):
+            with self.assertRaisesRegex(DocumentRejected, "conversor aislado"):
+                detect_format("cv.rtf", b"{\\rtf1 texto}")
+
+    @patch("app.services.document_text.shutil.which", return_value="docker")
+    @patch("app.services.document_text.subprocess.run", return_value=SimpleNamespace(returncode=1))
+    def test_converter_is_not_advertised_when_image_is_missing(self, run_mock, which_mock):
+        with patch.object(settings, "CV_LEGACY_CONVERTER_IMAGE", "ien-cv-converter:missing"):
+            from app.services.document_text import enabled_formats
+            self.assertNotIn("doc", enabled_formats())
+            run_mock.assert_called_once()
+
+    @patch("app.services.document_text.legacy_converter_available", return_value=True)
+    @patch("app.services.document_text.shutil.which", return_value="docker")
+    @patch("app.services.document_text.subprocess.run")
+    def test_legacy_conversion_uses_named_container_and_removes_it(self, run_mock, which_mock, available):
+        def docker_run(command, **kwargs):
+            if command[1] == "run":
+                output_mount = next(part for part in command if ":/output:rw" in part)
+                output_dir = output_mount.removesuffix(":/output:rw")
+                with open(f"{output_dir}/document.txt", "w", encoding="utf-8") as output:
+                    output.write("Experiencia como chofer")
+            return SimpleNamespace(returncode=0)
+
+        run_mock.side_effect = docker_run
+        with patch.object(settings, "CV_LEGACY_CONVERTER_IMAGE", "ien-cv-converter:local"):
+            self.assertEqual(extract_document_text(b"{\\rtf1 texto}", "rtf"), "Experiencia como chofer")
+        run, cleanup = [call.args[0] for call in run_mock.call_args_list]
+        self.assertIn("--name", run)
+        self.assertIn("ien-cv-convert-", run[run.index("--name") + 1])
+        self.assertEqual(cleanup[1:3], ["rm", "--force"])
+
+    @patch("app.services.document_text.legacy_converter_available", return_value=True)
+    @patch("app.services.document_text.shutil.which", return_value="docker")
+    @patch("app.services.document_text.subprocess.run")
+    def test_timed_out_converter_still_attempts_container_cleanup(self, run_mock, which_mock, available):
+        run_mock.side_effect = [subprocess.TimeoutExpired("docker", 30), SimpleNamespace(returncode=0)]
+        with patch.object(settings, "CV_LEGACY_CONVERTER_IMAGE", "ien-cv-converter:local"):
+            with self.assertRaisesRegex(DocumentRejected, "tiempo máximo"):
+                extract_document_text(b"{\\rtf1 texto}", "rtf")
+        self.assertEqual(run_mock.call_count, 2)
+        self.assertEqual(run_mock.call_args_list[1].args[0][1:3], ["rm", "--force"])

@@ -23,7 +23,7 @@ def _token_from_header(value: str | None) -> str | None:
 
 async def require_service_token(authorization: str | None = Header(default=None)) -> None:
     if not settings.SERVICE_API_TOKEN:
-        raise HTTPException(status_code=503, detail="Service authentication is not configured.")
+        raise HTTPException(status_code=503, detail="La autenticación del servicio no está configurada.")
     token = _token_from_header(authorization)
     if not token or not hmac.compare_digest(token, settings.SERVICE_API_TOKEN):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales de servicio inválidas.")
