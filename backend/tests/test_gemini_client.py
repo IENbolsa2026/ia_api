@@ -2,6 +2,7 @@
 
 import json
 import os
+import pickle
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,7 +13,7 @@ from app.services.cv_pipeline import _call_provider, process_cv_text
 from app.services.cv_compact_contract import fragment_schema
 from app.services.cv_consolidation import ConsolidationPlan
 from app.services.gemini_cv_schema import flatten_cv_schema
-from app.services.gemini_client import GeminiError, _retry_delay, generate_json, gemini_rate_limiter
+from app.services.gemini_client import GeminiError, GeminiUnavailable, _retry_delay, generate_json, gemini_rate_limiter
 from app.services.match_groq import GroqClient, GroqError
 from app.services.rate_limiter import ProviderResponseTruncated, RateLimitExceeded, groq_rate_limiter
 
@@ -38,6 +39,7 @@ class GeminiClientTests(unittest.TestCase):
         limiter = patch('app.services.gemini_client.gemini_rate_limiter')
         self.limiter = limiter.start().return_value
         self.limiter.record_response.return_value = 15
+        self.limiter.defer.return_value = 30
         self.addCleanup(limiter.stop)
         post = patch('app.services.gemini_client.httpx.post')
         self.post = post.start()
@@ -191,6 +193,43 @@ class GeminiClientTests(unittest.TestCase):
             with self.assertRaises(GeminiError):
                 generate_json('system', 'user', 'synthetic')
         self.post.assert_not_called()
+
+    def test_temporary_http_failures_share_cooldown_without_internal_retries(self):
+        for code in (500, 502, 503, 504):
+            with self.subTest(code=code):
+                self.post.reset_mock()
+                self.limiter.reset_mock()
+                self.post.return_value = httpx.Response(code, text='private CV and credential sentinel')
+                with self.assertRaises(GeminiUnavailable) as raised:
+                    generate_json('system', 'user', 'synthetic')
+                self.assertEqual(raised.exception.retry_after_seconds, 30)
+                self.post.assert_called_once()
+                self.limiter.reserve.assert_called_once()
+                self.limiter.defer.assert_called_once_with(30)
+                self.limiter.record_response.assert_not_called()
+                self.assertNotIn('sentinel', str(raised.exception))
+
+    def test_unavailable_honors_retry_info_and_keeps_retry_error_serializable(self):
+        self.post.return_value = httpx.Response(503, headers={'Retry-After': '90'}, json={
+            'error': {'details': [{'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '137.5s'}]},
+        })
+        self.limiter.defer.return_value = 137.5
+        with self.assertRaises(GeminiUnavailable) as raised:
+            generate_json('system', 'user', 'synthetic')
+        self.limiter.defer.assert_called_once_with(137.5)
+        restored = pickle.loads(pickle.dumps(raised.exception))
+        self.assertEqual(restored.retry_after_seconds, 137.5)
+        with patch('app.services.gemini_client.random.uniform', return_value=0):
+            self.assertEqual(restored.retry_countdown(1), 138)
+            self.assertEqual(restored.retry_countdown(4), 240)
+
+    def test_connection_failure_is_retryable_without_exposing_exception(self):
+        self.post.side_effect = httpx.ReadTimeout('private credential sentinel')
+        with self.assertRaises(GeminiUnavailable) as raised:
+            generate_json('system', 'user', 'synthetic')
+        self.limiter.defer.assert_called_once_with(30)
+        self.post.assert_called_once()
+        self.assertNotIn('sentinel', str(raised.exception))
 
     def test_gemini_cv_dispatch_keeps_existing_profile_shape_and_provider_model(self):
         self.post.return_value = httpx.Response(200, json=reply({'sk': []}))

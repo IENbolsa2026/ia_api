@@ -40,6 +40,26 @@ Las pausas por cuota pueden demorar varios minutos. Una salida incompleta nunca
 se presenta como un perfil completo. Los logs solo incluyen etapas, IDs y
 cantidades; no registran texto ni citas del CV.
 
+### Indisponibilidad temporal de Gemini
+
+HTTP 500, 502, 503, 504 y fallas de conexión o timeout se tratan como errores
+temporales del proveedor. Se comparte una pausa en Redis por clave/modelo, de
+30 segundos por defecto, respetando una espera mayor indicada por `Retry-After`
+o `RetryInfo`. No hay reintentos HTTP internos ni se devuelven las reservas de
+cuota de una solicitud fallida: cada nuevo intento vuelve a pasar por RPM/TPM/RPD.
+
+Celery reencola el trabajo con esperas de 30, 60, 120 y 240 segundos, más hasta
+5 segundos de variación, y libera sus bloqueos entre intentos. Una indicación
+mayor del proveedor tiene prioridad. Los paquetes ya terminados se conservan;
+si el CV avanza, se reinicia su contador de fallos temporales sin progreso.
+Después de cinco fallos sin avance se informa que Gemini no está disponible,
+en lugar de atribuir el error al archivo. La normalización, extracción de
+ofertas y el match también tienen reintentos acotados para estas fallas.
+
+Un callback con estado de entrega `delivered` solo confirma que la aplicación
+origen recibió el resultado: este puede ser un éxito o un fallo. El estado
+del análisis se obtiene de su resultado y error, no del éxito HTTP del callback.
+
 La conversión opcional de DOC/RTF se instala desde `backend` con:
 
 ```powershell

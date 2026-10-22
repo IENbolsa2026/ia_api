@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import re
+import random
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -31,6 +32,22 @@ class GeminiError(RuntimeError):
     pass
 
 
+class GeminiUnavailable(GeminiError):
+    """Temporary service/transport failure; one HTTP attempt per task admission."""
+
+    def __init__(self, retry_after_seconds: float = 30) -> None:
+        self.retry_after_seconds = retry_after_seconds
+        # Keep constructor arguments serializable when Celery transports this error.
+        super().__init__(retry_after_seconds)
+
+    def __str__(self) -> str:
+        return 'Gemini no está disponible temporalmente. El análisis se reintentará.'
+
+    def retry_countdown(self, failures: int) -> int:
+        backoff = min(300, 30 * 2 ** min(4, max(0, failures - 1)))
+        return math.ceil(max(self.retry_after_seconds, backoff) + random.uniform(0, 5))
+
+
 class GeminiRateLimiter(RedisRateLimiter):
     def reserve(self, member: str, estimated_tokens: int = 0, *, count_request: bool = True) -> None:
         budget = GeminiBudgetLimiter(
@@ -52,7 +69,7 @@ def gemini_rate_limiter(model: str) -> RedisRateLimiter:
     )
 
 
-def _retry_delay(response: httpx.Response) -> float:
+def _retry_delay(response: httpx.Response, default: float = 60.0) -> float:
     values = []
     header = response.headers.get('retry-after')
     if header:
@@ -78,7 +95,7 @@ def _retry_delay(response: httpx.Response) -> float:
                 values.append(min(86400.0, seconds))
     except (ValueError, TypeError):
         pass
-    return max(values) if values else 60.0
+    return max(values) if values else default
 
 
 def _daily_quota_exhausted(response: httpx.Response) -> bool:
@@ -155,7 +172,13 @@ def generate_json(system_prompt: str, user_payload: str, marker: str,
             timeout=httpx.Timeout(90, connect=10),
         )
     except (httpx.HTTPError, OSError):
-        raise GeminiError('No se pudo completar la solicitud al proveedor de análisis.') from None
+        wait = limiter.defer(30)
+        logger.warning('Gemini request deferred reason=transport seconds=%.3f', wait)
+        raise GeminiUnavailable(wait) from None
+    if response.status_code in {500, 502, 503, 504}:
+        wait = limiter.defer(_retry_delay(response, default=30))
+        logger.warning('Gemini request deferred status=%d seconds=%.3f', response.status_code, wait)
+        raise GeminiUnavailable(wait) from None
     if response.status_code == 429:
         delay = _retry_delay(response)
         daily_quota = _daily_quota_exhausted(response)

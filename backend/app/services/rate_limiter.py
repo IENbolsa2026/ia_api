@@ -165,6 +165,15 @@ class RedisRateLimiter:
             logger.info("Provider scheduling wait reason=%s seconds=%.3f", reason, wait)
             raise RateLimitExceeded(wait, reason=reason)
 
+    def defer(self, seconds: float) -> float:
+        """Share a temporary provider outage cooldown without changing quota balances."""
+        now = int(time.time() * 1000)
+        wait_ms = self.client.eval(
+            LUA_RECORD_RESPONSE, 2, self.cooldown_key, self.quota_key,
+            now, math.ceil(seconds * 1000), '', '',
+        )
+        return max(seconds, float(wait_ms) / 1000)
+
     def record_response(self, headers, *, status_code: int, estimated_tokens: int = 0) -> float:
         # Only parse documented numeric/duration fields; never log header maps,
         # provider response bodies, request text or credentials.

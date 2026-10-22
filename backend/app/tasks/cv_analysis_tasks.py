@@ -19,6 +19,7 @@ from app.services.document_text import DocumentRejected
 from app.services.cv_artifacts import artifact_path, delete_artifact
 from app.services.document_extractor_runner import extract_in_subprocess
 from app.services.rate_limiter import ProviderOutputLimitExceeded, ProviderResponseTruncated, RateLimitExceeded
+from app.services.gemini_client import GeminiUnavailable
 from app.services.result_notifier import notify_extraction_result
 from app.services.channel_events import publish_cv_analysis_complete
 
@@ -213,6 +214,27 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
             countdown=30,
             max_retries=max(10, self.request.retries + 1),
         ) from exc
+    except GeminiUnavailable as exc:
+        latest = store.get(job_id) or job
+        completed_now = count_completed_packets(latest.get('extraction_packets'))
+        # A later packet or consolidation gets its own outage budget after progress.
+        previous = 0 if completed_now > completed_packets_at_start else int(job.get('provider_unavailable_failures', 0))
+        failures = previous + 1
+        exhausted = failures >= self.max_retries
+        error = 'Gemini sigue sin estar disponible. Intentá realizar el análisis más tarde.' if exhausted else None
+        try:
+            store.update_owned(job_id, status='failed' if exhausted else 'processing',
+                               error=error, provider_unavailable_failures=failures)
+        except LockOwnershipLost as lock_exc:
+            raise self.retry(exc=lock_exc, countdown=30, max_retries=max(1000, self.request.retries + 1)) from lock_exc
+        if exhausted:
+            if payload.get('artifact_id'):
+                delete_artifact(payload['artifact_id'], payload.get('format', ''))
+            _queue_result_delivery(self, store, job_id, owned=True)
+            return {'job_id': job_id, 'status': 'failed'}
+        countdown = exc.retry_countdown(failures)
+        logger.warning('Extraction deferred for provider outage job=%s failures=%d seconds=%d', job_id, failures, countdown)
+        raise self.retry(exc=exc, countdown=countdown, max_retries=max(1000, self.request.retries + 1)) from exc
     except RateLimitExceeded as exc:
         if exc.is_local_wait:
             try:

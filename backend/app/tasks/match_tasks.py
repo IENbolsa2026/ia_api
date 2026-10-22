@@ -11,6 +11,7 @@ from app.services.match_job_store import MatchJobStore
 from app.services.job_store import LockOwnershipLost
 from app.services.match_groq import GroqClient
 from app.services.rate_limiter import RateLimitExceeded
+from app.services.gemini_client import GeminiUnavailable
 from app.services.match_scoring import build_result, candidate_evidence_index, questions
 
 
@@ -70,6 +71,15 @@ def evaluate_match_task(self: Any, request_id: str) -> dict[str, Any]:
         return result
     except Retry:
         raise
+    except GeminiUnavailable as exc:
+        failures = int(job.get('provider_unavailable_failures', 0)) + 1
+        if failures >= self.max_retries:
+            update_owned(status='failed', provider_unavailable_failures=failures,
+                         error='Gemini sigue sin estar disponible. Intentá calcular la compatibilidad más tarde.')
+            return {'request_id': request_id, 'status': 'failed'}
+        update_owned(status='processing', error=None, provider_unavailable_failures=failures)
+        raise self.retry(exc=exc, countdown=exc.retry_countdown(failures),
+                         max_retries=max(1000, self.request.retries + 1)) from exc
     except RateLimitExceeded as exc:
         if exc.is_local_wait:
             update_owned(status='rate_limited')
