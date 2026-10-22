@@ -67,7 +67,7 @@ class RateLimitExceeded(RuntimeError):
     def __init__(self, retry_after_seconds: float, reason: str = "provider") -> None:
         self.retry_after_seconds = retry_after_seconds
         self.reason = reason
-        self.is_local_wait = reason in {"cooldown", "token_headroom", "rpm"}
+        self.is_local_wait = reason in {"cooldown", "token_headroom", "rpm", "daily_budget"}
         super().__init__("Provider rate limit reservation was not available.")
 
 

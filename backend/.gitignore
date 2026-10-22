@@ -130,6 +130,9 @@ minio
 .sonarqube/*
 .scannerwork
 .ruff_cache
+
+# Temporary document-parser fixtures; keep source fixtures under tests/fixtures.
+tests/tmp*/
 sonarqube
 sonarqube/extensions
 sonarqube/data

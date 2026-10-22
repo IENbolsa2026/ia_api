@@ -38,6 +38,13 @@ class WireSkill(_WireModel):
     source_quotes: list[str] = Field(default_factory=list, max_length=8, alias="q")
     concept_id: str | None = Field(default=None, max_length=120, alias="ci")
 
+    @field_validator("name")
+    @classmethod
+    def require_display_name(cls, value):
+        if value.casefold().startswith("soft."):
+            raise ValueError("El nombre debe ser legible; el identificador de concepto corresponde a ci.")
+        return value
+
     @field_validator("evidence", "source_quotes", mode="before")
     @classmethod
     def accept_one_transport_string(cls, value):

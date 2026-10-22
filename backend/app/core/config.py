@@ -31,6 +31,14 @@ class Settings(BaseSettings, extra="ignore"):
     API_V1_STR: str = f"/api/{API_VERSION}"
     LLM_PROVIDER: str = "groq"
     GROQ_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
+    GEMINI_REQUESTS_PER_MINUTE: int = Field(default=4, ge=1)
+    GEMINI_PAUSA_SEGUNDOS: int = Field(default=0, ge=0)
+    GEMINI_MAX_OUTPUT_TOKENS: int = Field(default=8192, ge=1)
+    GEMINI_INPUT_TOKENS_PER_MINUTE: int = Field(default=20000, ge=1000)
+    GEMINI_REQUESTS_PER_DAY: int = Field(default=20, ge=1)
+    GEMINI_MAX_INPUT_TOKENS_PER_REQUEST: int = Field(default=12000, ge=1000)
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_MAX_OUTPUT_TOKENS: int = 6000
@@ -41,7 +49,7 @@ class Settings(BaseSettings, extra="ignore"):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     CV_MODEL: str = "qwen/qwen3.8-27b"
     CV_BLOQUE_CARACTERES: int = 4000
-    CV_PACKET_CHARACTERS: int = Field(default=500, ge=80, le=4000)
+    CV_PACKET_CHARACTERS: int = Field(default=500, ge=80, le=20000)
     CV_EXTRACTION_MAX_TOKENS: int = Field(default=950, ge=1)
     GROQ_MAX_TOKENS: int = 6000
     GROQ_PAUSA_SEGUNDOS: int = 12

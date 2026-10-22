@@ -3,7 +3,7 @@
 import asyncio
 import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from celery.exceptions import Retry
 
@@ -16,6 +16,57 @@ from ien_contracts.utils import content_hash
 
 
 class RecoveryIntegrityTests(unittest.TestCase):
+    def test_callback_enqueue_failure_still_retries_after_many_local_quota_waits(self):
+        state = {
+            'job_id': 'synthetic-delivery', 'status': 'accepted',
+            'payload': {'kind': 'profile_normalization', 'candidate_id': 42, 'profile_snapshot': {}},
+        }
+        store = MagicMock()
+        store.get.side_effect = lambda _job_id: state.copy()
+        store.acquire_lock.return_value = True
+
+        def update_owned(_job_id, **changes):
+            state.update(changes)
+            return state.copy()
+
+        store.update_owned.side_effect = update_owned
+        with patch('app.tasks.cv_analysis_tasks.ExtractionJobStore', return_value=store), \
+             patch('app.tasks.cv_analysis_tasks.normalize_candidate_profile', new_callable=AsyncMock, return_value={}), \
+             patch('app.tasks.cv_analysis_tasks.deliver_extraction_result_task.delay', side_effect=OSError('synthetic broker unavailable')):
+            run_extraction_task.push_request(
+                id='synthetic-extraction', retries=50, called_directly=False, is_eager=True,
+                args=('synthetic-delivery',), kwargs={},
+            )
+            try:
+                # Exercise Celery's real retry limit instead of mocking retry().
+                with self.assertRaises(Retry):
+                    run_extraction_task.run('synthetic-delivery')
+            finally:
+                run_extraction_task.pop_request()
+        self.assertEqual(state['status'], 'completed')
+        self.assertEqual(state['result'], {})
+        self.assertEqual(state['delivery_enqueue_failures'], 1)
+
+    def test_callback_enqueue_failures_remain_bounded_without_repeating_inference(self):
+        state = {
+            'job_id': 'synthetic-terminal', 'status': 'completed', 'result': {'skills': []},
+            'error': None, 'delivery_enqueue_failures': 4,
+        }
+        store = MagicMock()
+        store.get.side_effect = lambda _job_id: state.copy()
+        store.update.side_effect = lambda _job_id, **changes: state.update(changes)
+        with patch('app.tasks.cv_analysis_tasks.ExtractionJobStore', return_value=store), \
+             patch('app.tasks.cv_analysis_tasks.process_cv_text') as inference, \
+             patch('app.tasks.cv_analysis_tasks.deliver_extraction_result_task.delay', side_effect=OSError('synthetic broker unavailable')):
+            with self.assertRaises(OSError):
+                run_extraction_task.run('synthetic-terminal')
+        self.assertEqual(state['status'], 'delivery_failed')
+        self.assertEqual(state['delivery_enqueue_failures'], 5)
+        self.assertEqual(state['result'], {'skills': []})
+        self.assertIsNone(state['error'])
+        inference.assert_not_called()
+        store.acquire_lock.assert_not_called()
+
     def test_idempotent_workers_keep_messages_until_completion(self):
         for task in (run_extraction_task, evaluate_match_task, deliver_extraction_result_task):
             with self.subTest(task=task.name):

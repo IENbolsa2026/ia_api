@@ -144,6 +144,50 @@ La clave `CV_RESULT_CALLBACK_SECRET` debe ser idéntica a
 `IA_CALLBACK_TOKEN` en el `.env` de Django. El modelo indicado está disponible
 para la cuenta de Groq utilizada por este proyecto.
 
+#### Alternativa ligera con Gemini
+
+Para usar Gemini Flash-Lite en extracción y compatibilidad, reemplaza la
+selección de proveedor del ejemplo anterior por estos valores en el `.env`
+privado; conserva los secretos de integración entre servicios:
+
+```dotenv
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=tu-clave-privada-de-ai-studio
+GEMINI_MODEL=gemini-3.5-flash-lite
+# Ejemplo para cuota verificada de 15 RPM / 250.000 TPM / 500 RPD.
+GEMINI_REQUESTS_PER_MINUTE=12
+GEMINI_INPUT_TOKENS_PER_MINUTE=200000
+GEMINI_REQUESTS_PER_DAY=400
+GEMINI_PAUSA_SEGUNDOS=0
+GEMINI_MAX_INPUT_TOKENS_PER_REQUEST=60000
+GEMINI_MAX_OUTPUT_TOKENS=16384
+CV_PACKET_CHARACTERS=20000
+CV_BLOQUE_CARACTERES=20000
+CV_EXTRACTION_MAX_TOKENS=16384
+```
+
+Son límites locales conservadores, no cuotas garantizadas por Google. Consulta
+RPM, TPM y RPD efectivos en Google AI Studio. Una clave nueva del mismo proyecto
+comparte cuotas. La integración usa pensamiento mínimo, JSON validado localmente
+y espera los 429 según las indicaciones del proveedor. El modelo selecciona IDs
+de citas literales preparadas por el servidor; un ID inválido no se convierte
+en evidencia. Un fragmento inválido admite un único reintento de corrección.
+
+Los CV se procesan de a uno mediante un lease global Redis, con concurrencia y
+prefetch uno en Celery. La reserva atómica controla RPM, TPM de entrada estimados
+y RPD; la ventana diaria local es móvil de 24 horas. Las esperas diarias liberan
+el worker y reprograman el trabajo. Una hoja válida sin posibles duplicados se
+ensambla en código; múltiples hojas o ambigüedad conservan consolidación LLM.
+Se divide antes de llamar si la entrada supera su presupuesto, o después si la
+salida queda truncada. Los callbacks reciben prioridad para entregar resultados.
+
+En Django usa `MATCH_MODEL_VERSION=gemini:gemini-3.5-flash-lite` para separar
+la caché del proveedor previo. `scripts/configure_ia_match.py` conserva el
+proveedor elegido y sincroniza ese valor. Reinicia API, worker y procesos Django
+después de cambiar la configuración, cuando no haya trabajos en curso. No guardes
+claves en código ni informes. Las referencias históricas a Groq en este documento
+describen el proveedor original; con `LLM_PROVIDER=gemini` el flujo usa Gemini.
+
 ### 3. Preparar Django
 
 En `repositorio/BolsaTrabajo`, crea su entorno, instala dependencias, configura

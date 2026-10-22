@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import json
 import logging
+import re
 from typing import Any
 
 from app.services.cv_compact_contract import validate_expanded_profile, validate_fragment
@@ -29,6 +30,41 @@ class PacketsIdentityError(ValueError):
 
     def __init__(self) -> None:
         super().__init__("El progreso guardado del CV no coincide con este análisis. Iniciá un análisis nuevo.")
+
+
+def _quote_catalog(text: str) -> dict[str, str]:
+    """Source-owned literal spans let small models cite IDs without rewriting text."""
+    spans = []
+    for sentence in re.split(r"(?<=[.!?;])\s+|\n+", text):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        start = 0
+        while start < len(sentence):
+            quote = sentence[start:start + 160]
+            if quote and quote not in spans:
+                spans.append(quote)
+            if start + 160 >= len(sentence):
+                break
+            start += 128
+    return {f"quote_{index}": span for index, span in enumerate(spans)}
+
+
+def _resolve_quote_ids(raw: dict, catalog: dict[str, str]) -> dict:
+    value = copy.deepcopy(raw)
+    for section in ("sk", "c"):
+        entries = value.get(section, [])
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            quotes = entry.get("q", [])
+            if isinstance(quotes, str):
+                quotes = [quotes]
+            if isinstance(quotes, list):
+                entry["q"] = [catalog.get(quote, quote) if isinstance(quote, str) else quote for quote in quotes]
+    return value
 
 
 def make_packet_identity(
@@ -328,6 +364,45 @@ def _split_text_exact(text: str, minimum_chars: int = 40) -> tuple[str, str]:
     return left, right
 
 
+def _single_fragment_plan(fragments: list[dict[str, Any]], facts: dict[str, list]) -> dict | None:
+    """Skip semantic grouping only when one leaf has no potentially repeated facts."""
+    if len(fragments) != 1:
+        return None
+
+    def normalized(value: Any) -> str | None:
+        if value is None:
+            return None
+        value = re.sub(r"\s+", " ", str(value)).strip().casefold()
+        return None if value in {"", "unknown"} else value
+
+    identity_fields = {
+        "x": ("t", "o"), "ed": ("l", "f", "i"),
+        "l": ("n",), "c": ("n", "i", "d", "x"),
+    }
+    for alias, rows in facts.items():
+        for index, first in enumerate(rows):
+            for second in rows[index + 1:]:
+                if alias == "sk":
+                    same_name = normalized(first.get("n")) == normalized(second.get("n"))
+                    concept = normalized(first.get("ci"))
+                    if same_name or (concept is not None and concept == normalized(second.get("ci"))):
+                        return None
+                else:
+                    # A missing identity component does not prove records are
+                    # different. Leave these ambiguous merges to consolidation.
+                    if all(
+                        normalized(first.get(key)) is None
+                        or normalized(second.get(key)) is None
+                        or normalized(first.get(key)) == normalized(second.get(key))
+                        for key in identity_fields[alias]
+                    ):
+                        return None
+    return {
+        "h": fragments[0].get("h"), "s": fragments[0].get("s"),
+        **{alias: [[row["id"]] for row in rows] for alias, rows in facts.items()},
+    }
+
+
 async def process_packetized_cv_text(
     text: str,
     candidate_id: int,
@@ -369,19 +444,39 @@ async def process_packetized_cv_text(
         if packet["status"] == "completed":
             return
         packet_text = text[packet["start"]:packet["end"]]
-        try:
-            raw = await call_provider(
-                load_prompt("cv_extraction.v2.packets-soft.v2.system.md") +
-                "\nTarea: extraé hechos solo de este paquete y respondé con aliases compactos, sin identidad ni habilidades rechazadas.",
-                json.dumps({
+        quote_catalog = _quote_catalog(packet_text)
+        system_prompt = load_prompt("cv_extraction.v2.packets-soft.v6.system.md") + (
+            "\nTarea: extraé hechos solo de este paquete y respondé con aliases compactos, sin identidad ni habilidades rechazadas."
+        )
+        payload = json.dumps({
                     "packet_id": packet_id,
                     "packet_index": packet["index"],
                     "text": packet_text,
+                    "source_quotes": quote_catalog,
                     "fragment_schema": _fragment_schema(),
-                }, ensure_ascii=False),
-                f"cv-packet-{identity['job_id']}-{packet_id}",
-                on_heartbeat=on_heartbeat,
-            )
+                }, ensure_ascii=False)
+        try:
+            for attempt in range(2):
+                raw = await call_provider(
+                    system_prompt, payload,
+                    f"cv-packet-{identity['job_id']}-{packet_id}-validation-{attempt}",
+                    on_heartbeat=on_heartbeat,
+                )
+                provider_model = raw.pop("__provider_model", None)
+                try:
+                    _expanded, compact = validate_fragment(_resolve_quote_ids(raw, quote_catalog), packet_text)
+                    break
+                except ValueError:
+                    if attempt:
+                        raise
+                    logger.info("CV packet validation retry id=%s", packet_id)
+                    system_prompt += (
+                        "\nLa respuesta anterior no pasó la validación. Volvé a extraer desde el texto original: "
+                        "respetá los tipos y límites de todos los arrays; cada cita q debe ser una subcadena literal "
+                        "de ese texto de hasta 160 caracteres, sin cambios de conjugación ni ortografía. "
+                        "No inventes evidencia para completar campos."
+                        " El nombre n debe ser legible en español; los identificadores soft.* corresponden a ci, nunca a n."
+                    )
         except ProviderResponseTruncated:
             left, right = _split_text_exact(packet_text)
             middle = packet["start"] + len(left)
@@ -397,8 +492,6 @@ async def process_packetized_cv_text(
             await process_packet(right_node["id"])
             return
 
-        provider_model = raw.pop("__provider_model", None)
-        _expanded, compact = validate_fragment(raw, packet_text)
         packet["result"] = compact
         packet["status"] = "completed"
         packet["provider_model"] = provider_model
@@ -419,18 +512,23 @@ async def process_packetized_cv_text(
     facts = compact_facts_for_plan(fragments)
     logger.info("CV packet extraction ready packets=%d facts=%s", len(leaves), {key: len(value) for key, value in facts.items()})
 
-    plan_raw = await call_provider(
-        load_prompt("cv_consolidation.v2.refs.system.md"),
-        json.dumps({
-            "candidate_id": str(candidate_id),
-            "candidate_profile_version": "candidate-profile.v2",
-            "facts": facts,
-            "plan_schema": ConsolidationPlan.model_json_schema(by_alias=True),
-        }, ensure_ascii=False),
-        f"cv-packet-{identity['job_id']}-consolidation-plan",
-        on_heartbeat=on_heartbeat,
-    )
-    provider_model = plan_raw.pop("__provider_model", None)
+    plan_raw = _single_fragment_plan(fragments, facts)
+    provider_model = None
+    if plan_raw is None:
+        plan_raw = await call_provider(
+            load_prompt("cv_consolidation.v2.refs.system.md"),
+            json.dumps({
+                "candidate_id": str(candidate_id),
+                "candidate_profile_version": "candidate-profile.v2",
+                "facts": facts,
+                "plan_schema": ConsolidationPlan.model_json_schema(by_alias=True),
+            }, ensure_ascii=False),
+            f"cv-packet-{identity['job_id']}-consolidation-plan",
+            on_heartbeat=on_heartbeat,
+        )
+        provider_model = plan_raw.pop("__provider_model", None)
+    else:
+        logger.info("CV consolidation completed locally packets=1")
     profile, effective_plan = validate_and_build_profile_with_effective_plan(plan_raw, fragments, candidate_id)
     profile = validate_expanded_profile(profile, text, candidate_id)
     manifest["consolidation"] = {

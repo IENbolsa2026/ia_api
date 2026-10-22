@@ -113,7 +113,7 @@ class CvConsolidationTests(unittest.TestCase):
 
 class CvEffectivePacketPlanTests(unittest.IsolatedAsyncioTestCase):
     async def test_packet_checkpoint_stores_repaired_effective_plan_and_rebuilds_cache(self):
-        text = "Python SQL"
+        text = "Python SQL Inglés"
         provider = settings.LLM_PROVIDER.strip().lower()
         model = settings.OPENAI_MODEL if provider == "openai" else settings.CV_MODEL
         identity = make_packet_identity(
@@ -127,11 +127,11 @@ class CvEffectivePacketPlanTests(unittest.IsolatedAsyncioTestCase):
         async def provider_call(_system, payload, marker, *, on_heartbeat=None):
             provider_calls.append(marker)
             if marker.endswith("consolidation-plan"):
-                return {"h": None, "s": None, "sk": [["sk0", "sk1"]], "x": [], "ed": [], "l": [], "c": []}
+                return {"h": None, "s": None, "sk": [["sk0", "sk1"]], "x": [], "ed": [], "l": [["l0", "l1"]], "c": []}
             return {"sk": [
                 {"n": "Python", "k": "technical", "o": "declared", "e": ["Conoce Python"], "q": ["Python"], "ci": "python"},
                 {"n": "SQL", "k": "technical", "o": "declared", "e": ["Conoce SQL"], "q": ["SQL"], "ci": "sql"},
-            ]}
+            ], "l": [{"n": "Inglés", "l": "basic"}, {"n": "Inglés"}]}
 
         with patch("app.services.cv_packets.load_prompt", return_value="prompt"):
             profile, _model_name = await process_packetized_cv_text(
@@ -200,9 +200,9 @@ class CvEffectivePacketPlanTests(unittest.IsolatedAsyncioTestCase):
                     text, 42, identity=identity, checkpoint=manifest, on_checkpoint=migrated.append,
                     on_heartbeat=None, call_provider=plan_provider,
                 )
-                self.assertEqual(len(requests), 1)
-                self.assertTrue(requests[0].endswith("consolidation-plan"))
+                self.assertEqual(requests, [])  # One cached leaf assembles locally after migration.
                 self.assertEqual(migrated[0]["schema_version"], "cv-packets.v2")
+                self.assertEqual(migrated[-1]["consolidation"]["status"], "completed")
 
 
 if __name__ == "__main__":

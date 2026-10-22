@@ -28,7 +28,7 @@ class SoftSkillExtractionTests(unittest.IsolatedAsyncioTestCase):
              patch.object(settings, 'CV_EXTRACTION_MAX_TOKENS', 950), \
              patch.object(settings, 'CV_PACKET_CHARACTERS', 500):
             result = await process_cv_text(text, 42)
-        self.assertEqual(call.await_count, 2)  # One packet and the existing consolidation.
+        self.assertEqual(call.await_count, 1)  # One unambiguous packet assembles locally.
         return result
 
     async def test_preserves_inferred_and_declared_soft_skills_with_distinct_evidence(self):

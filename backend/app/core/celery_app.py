@@ -26,6 +26,15 @@ celery_app.conf.update(
     # Con ACK temprano, una caída del proceso perdería una extracción en curso.
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    # Keep a single local execution slot and avoid reserving later CV tasks in
+    # advance; the Redis lease also serializes candidate CVs across workers.
+    worker_concurrency=1,
+    worker_prefetch_multiplier=1,
+    # Redis priority 0 is highest: publish completion callbacks ahead of the
+    # normal-priority CV requests waiting behind the current extraction.
+    task_default_priority=5,
+    broker_transport_options={"queue_order_strategy": "priority"},
+    task_routes={"app.tasks.deliver_extraction_result": {"priority": 0}},
     # JSON es portable entre Redis y evita serializar objetos Python arbitrarios.
     task_serializer="json",
     result_serializer="json",

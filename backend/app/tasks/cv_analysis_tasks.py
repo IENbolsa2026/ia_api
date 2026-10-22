@@ -24,6 +24,7 @@ from app.services.channel_events import publish_cv_analysis_complete
 
 
 logger = logging.getLogger(__name__)
+CV_SERIAL_LOCK_ID = "__cv_serial__"
 
 
 def _callback_payload(job: dict[str, Any]) -> dict[str, Any]:
@@ -47,6 +48,32 @@ def _callback_payload(job: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _queue_result_delivery(task: Any, store: ExtractionJobStore, job_id: str, *, owned: bool = False) -> None:
+    try:
+        deliver_extraction_result_task.delay(job_id)
+    except Exception as exc:
+        job = store.get(job_id)
+        if job is None:
+            raise
+        failures = int(job.get("delivery_enqueue_failures", 0)) + 1
+        changes: dict[str, Any] = {"delivery_enqueue_failures": failures}
+        if failures >= task.max_retries:
+            changes.update(status="delivery_failed", delivery_error="No se pudo encolar la entrega del resultado a Bolsa.")
+        try:
+            update = store.update_owned if owned else store.update
+            update(job_id, **changes)
+        except LockOwnershipLost as lock_exc:
+            raise task.retry(exc=lock_exc, countdown=30, max_retries=max(10, task.request.retries + 1)) from lock_exc
+        if failures >= task.max_retries:
+            raise
+        # Quota scheduling may already have incremented Celery's request count
+        # many times. The independent persisted counter bounds enqueue failures.
+        raise task.retry(
+            exc=exc, countdown=min(60, 2 ** (failures - 1)),
+            max_retries=max(task.max_retries, task.request.retries + 1),
+        ) from exc
+
+
 @celery_app.task(bind=True, max_retries=5, name="app.tasks.run_extraction")
 def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
     store = ExtractionJobStore()
@@ -56,33 +83,42 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
     if job["status"] in {"completed", "failed", "delivery_failed"}:
         # Reintenta publicar la entrega si el worker terminó tras guardar el
         # resultado pero antes de que Celery aceptara la tarea de callback.
-        try:
-            deliver_extraction_result_task.delay(job_id)
-        except Exception as exc:
-            raise self.retry(exc=exc, countdown=min(60, 2 ** self.request.retries)) from exc
+        _queue_result_delivery(self, store, job_id)
         return {"job_id": job_id, "status": job["status"]}
     if job["status"] in {"delivering", "delivered"}:
         return {"job_id": job_id, "status": job["status"]}
-    if not store.acquire_lock(job_id):
-        # La tarea pudo ser reentregada mientras otra ejecución aún conserva
-        # el lease, o después de que un worker muriera. Reintentar permite
-        # recuperar el trabajo cuando venza el lock sin confirmar la tarea.
-        countdown = min(600, 30 * (2 ** max(0, int(self.request.retries))))
-        raise self.retry(
-            exc=RuntimeError("El trabajo sigue bloqueado por otra ejecución."),
-            countdown=countdown,
-        )
+    is_candidate_cv = job.get("payload", {}).get("kind") == "candidate_cv"
+    serial_lock_acquired = False
+    job_lock_acquired = False
+    if is_candidate_cv:
+        if not store.acquire_lock(CV_SERIAL_LOCK_ID):
+            # Keep this job accepted while another worker owns the single CV
+            # slot. This retry is queue contention, not a provider attempt.
+            raise self.retry(
+                exc=RuntimeError("La cola de CV sigue ocupada."),
+                countdown=5,
+                max_retries=max(1000, int(self.request.retries) + 1),
+            )
+        serial_lock_acquired = True
     try:
+        if not store.acquire_lock(job_id):
+            # A redelivery can race with an execution that still owns its
+            # per-job lease. Release the serial slot in finally before retrying.
+            countdown = min(600, 30 * (2 ** max(0, int(self.request.retries))))
+            retry_options = {"max_retries": max(1000, int(self.request.retries) + 1)} if is_candidate_cv else {}
+            raise self.retry(
+                exc=RuntimeError("El trabajo sigue bloqueado por otra ejecución."),
+                countdown=countdown,
+                **retry_options,
+            )
+        job_lock_acquired = True
         # Refresh after acquiring the lease. Another worker may have completed
         # and released it after our first read, while this task waited in queue.
         job = store.get(job_id)
         if not job:
             return {"job_id": job_id, "status": "missing"}
         if job["status"] in {"completed", "failed", "delivery_failed"}:
-            try:
-                deliver_extraction_result_task.delay(job_id)
-            except Exception as exc:
-                raise self.retry(exc=exc, countdown=min(60, 2 ** self.request.retries)) from exc
+            _queue_result_delivery(self, store, job_id, owned=True)
             return {"job_id": job_id, "status": job["status"]}
         if job["status"] in {"delivering", "delivered"}:
             return {"job_id": job_id, "status": job["status"]}
@@ -115,11 +151,17 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
                 if not payload.get("artifact_id"):
                     artifact.unlink(missing_ok=True)
             def extraction_heartbeat() -> None:
-                if not store.renew_lock(job_id):
+                job_lock_ok = store.renew_lock(job_id)
+                serial_lock_ok = store.renew_lock(CV_SERIAL_LOCK_ID)
+                if not job_lock_ok or not serial_lock_ok:
                     raise LockOwnershipLost("Se perdió el lease durante la extracción del CV.")
 
             provider = settings.LLM_PROVIDER.strip().lower()
-            configured_model = settings.OPENAI_MODEL if provider == "openai" else settings.CV_MODEL
+            configured_model = (
+                settings.OPENAI_MODEL if provider == "openai"
+                else settings.GEMINI_MODEL if provider == "gemini"
+                else settings.CV_MODEL
+            )
             packet_identity = make_packet_identity(
                 job_id=job_id,
                 analysis_id=int(payload["analysis_id"]),
@@ -153,15 +195,14 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
         else:
             raise ValueError("Unsupported extraction kind.")
         provider_model = getattr(result, "provider_model", None) or (
-            settings.OPENAI_MODEL if settings.LLM_PROVIDER.strip().lower() == "openai" else settings.CV_MODEL
+            settings.OPENAI_MODEL if settings.LLM_PROVIDER.strip().lower() == "openai"
+            else settings.GEMINI_MODEL if settings.LLM_PROVIDER.strip().lower() == "gemini"
+            else settings.CV_MODEL
         )
         store.update_owned(job_id, status="completed", result=result, error=None, provider_model=provider_model)
         if payload.get("artifact_id"):
             delete_artifact(payload["artifact_id"], payload.get("format", ""))
-        try:
-            deliver_extraction_result_task.delay(job_id)
-        except Exception as exc:
-            raise self.retry(exc=exc, countdown=min(60, 2 ** self.request.retries)) from exc
+        _queue_result_delivery(self, store, job_id, owned=True)
         return {"job_id": job_id, "status": "completed"}
     except Retry:
         raise
@@ -199,10 +240,7 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
                 raise self.retry(exc=lock_exc, countdown=30, max_retries=max(10, self.request.retries + 1)) from lock_exc
             if payload.get("artifact_id"):
                 delete_artifact(payload["artifact_id"], payload.get("format", ""))
-            try:
-                deliver_extraction_result_task.delay(job_id)
-            except Exception as delivery_exc:
-                raise self.retry(exc=delivery_exc, countdown=min(60, int(exc.retry_after_seconds) + 1)) from delivery_exc
+            _queue_result_delivery(self, store, job_id, owned=True)
             return {"job_id": job_id, "status": "failed"}
         try:
             store.update_owned(job_id, status="rate_limited", error=None, rate_limit_stalls=rate_limit_stalls, provider_failures=provider_failures)
@@ -238,10 +276,7 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
                 raise self.retry(exc=lock_exc, countdown=30, max_retries=max(10, self.request.retries + 1)) from lock_exc
             if payload.get("artifact_id"):
                 delete_artifact(payload["artifact_id"], payload.get("format", ""))
-            try:
-                deliver_extraction_result_task.delay(job_id)
-            except Exception as delivery_exc:
-                raise self.retry(exc=delivery_exc, countdown=min(60, 2 ** self.request.retries)) from delivery_exc
+            _queue_result_delivery(self, store, job_id, owned=True)
             return {"job_id": job_id, "status": "failed"}
         provider_failures += 1
         if provider_failures < self.max_retries:
@@ -253,13 +288,18 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
             raise self.retry(exc=lock_exc, countdown=30, max_retries=max(10, self.request.retries + 1)) from lock_exc
         if payload.get("artifact_id"):
             delete_artifact(payload["artifact_id"], payload.get("format", ""))
-        deliver_extraction_result_task.delay(job_id)
+        _queue_result_delivery(self, store, job_id, owned=True)
         raise
     finally:
-        store.release_lock(job_id)
+        try:
+            if job_lock_acquired:
+                store.release_lock(job_id)
+        finally:
+            if serial_lock_acquired:
+                store.release_lock(CV_SERIAL_LOCK_ID)
 
 
-@celery_app.task(bind=True, max_retries=8, name="app.tasks.deliver_extraction_result")
+@celery_app.task(bind=True, max_retries=8, priority=0, name="app.tasks.deliver_extraction_result")
 def deliver_extraction_result_task(self: Any, job_id: str) -> dict[str, Any]:
     store = ExtractionJobStore()
     job = store.get(job_id)

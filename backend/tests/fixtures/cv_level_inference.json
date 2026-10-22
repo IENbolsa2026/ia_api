@@ -1,0 +1,58 @@
+{
+  "synthetic_only": true,
+  "purpose": "Live benchmark inputs and offline transport expectations; expected_levels are acceptance ranges, not provider outputs.",
+  "cases": [
+    {
+      "id": "salud_practica_guiada",
+      "sector": "salud",
+      "text": "CV FICTICIO. Auxiliar en formación. Habilidad: Registro de signos vitales. Practiqué la toma y el registro de temperatura siguiendo una guía, con supervisión en cada medición. No declaro nivel ni años de uso.",
+      "expectations": [{"name": "Registro de signos vitales", "kind": "technical", "origin": "declared", "expected_levels": ["beginner"], "source_quote_clues": ["con supervisión en cada medición"], "stub_level": "beginner", "stub_evidence": "La práctica guiada y supervisada en cada medición sustenta nivel inicial."}],
+      "forbid_inferred_years": true,
+      "forbid_inferred_language_levels": true
+    },
+    {
+      "id": "comercio_ejecucion_habitual",
+      "sector": "comercio",
+      "text": "CV FICTICIO. Habilidad: Atención al cliente. Atiendo consultas y devoluciones de una tienda cada día; verifico comprobantes, aplico el procedimiento y soy responsable de registrar y seguir cada caso hasta su cierre.",
+      "expectations": [{"name": "Atención al cliente", "kind": "soft", "origin": "declared", "expected_levels": ["intermediate"], "source_quote_clues": ["soy responsable de registrar y seguir cada caso hasta su cierre"], "stub_level": "intermediate", "stub_evidence": "La atención diaria con seguimiento responsable de cada caso sustenta nivel intermedio."}],
+      "forbid_inferred_years": true,
+      "forbid_inferred_language_levels": true
+    },
+    {
+      "id": "operaciones_casos_complejos_autonomos",
+      "sector": "operaciones",
+      "text": "CV FICTICIO. Habilidad: Diagnóstico de fallas. Resuelvo sin supervisión fallas no rutinarias de una línea de envasado: comparo mediciones, descarto causas y elijo la reparación. Rediseñé el control tras validar alternativas y reduje las paradas registradas de seis a dos por mes.",
+      "expectations": [{"name": "Diagnóstico de fallas", "kind": "technical", "origin": "declared", "expected_levels": ["advanced"], "source_quote_clues": ["Resuelvo sin supervisión fallas no rutinarias", "reduje las paradas registradas de seis a dos por mes"], "stub_level": "advanced", "stub_evidence": "Resuelve fallas no rutinarias sin supervisión y valida mejoras con resultados registrados: nivel avanzado."}],
+      "forbid_inferred_years": true,
+      "forbid_inferred_language_levels": true
+    },
+    {
+      "id": "educacion_metodos_validados",
+      "sector": "educación",
+      "text": "CV FICTICIO. Habilidad: Evaluación educativa. Resuelvo de forma autónoma casos de evaluación con barreras combinadas de lectura y comunicación. Diseñé y validé un método de evaluación accesible mediante tres ciclos de comparación de resultados. Se adoptó en seis centros y formé a sus equipos para aplicarlo; los informes documentaron menor discrepancia entre evaluadores.",
+      "expectations": [{"name": "Evaluación educativa", "kind": "technical", "origin": "declared", "expected_levels": ["advanced", "expert"], "source_quote_clues": ["Diseñé y validé un método de evaluación accesible", "Se adoptó en seis centros"], "stub_level": "expert", "stub_evidence": "Resuelve casos complejos y valida un método adoptado por seis centros con resultados documentados."}],
+      "forbid_inferred_years": true,
+      "forbid_inferred_language_levels": true
+    },
+    {
+      "id": "administracion_menciones_sin_tareas",
+      "sector": "administración",
+      "text": "CV FICTICIO. Auxiliar administrativa. Cinco años de empleo. Herramientas: Excel, Word. No se describen tareas, responsabilidad, autonomía ni nivel de uso. No declaro idiomas ni certificaciones.",
+      "expectations": [
+        {"name": "Excel", "kind": "technical", "origin": "declared", "expected_levels": ["unknown"], "source_quote_clues": ["Excel"], "stub_level": "unknown", "stub_evidence": "Menciona Excel sin describir su uso; no alcanza para estimar nivel."},
+        {"name": "Word", "kind": "technical", "origin": "declared", "expected_levels": ["unknown"], "source_quote_clues": ["Word"], "stub_level": "unknown", "stub_evidence": "Menciona Word sin tareas atribuibles; no alcanza para estimar nivel."}
+      ],
+      "forbid_soft_skills": true,
+      "forbid_inferred_years": true,
+      "forbid_inferred_language_levels": true
+    },
+    {
+      "id": "oficio_nivel_expreso",
+      "sector": "oficio",
+      "text": "CV FICTICIO. Habilidad: Soldadura. Nivel de soldadura declarado: avanzado. Realicé un curso de seguridad de 40 horas. No declaro años de soldadura ni idiomas ni matrícula profesional.",
+      "expectations": [{"name": "Soldadura", "kind": "technical", "origin": "declared", "expected_levels": ["advanced"], "source_quote_clues": ["Nivel de soldadura declarado: avanzado"], "stub_level": "advanced", "stub_evidence": "Conserva la autoevaluación explícita de soldadura avanzada; no implica certificación verificada."}],
+      "forbid_inferred_years": true,
+      "forbid_inferred_language_levels": true
+    }
+  ]
+}

@@ -52,7 +52,7 @@ class ProfileContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["requirements"][0]["minimum_years"], 2.0)
 
     @patch("app.services.cv_pipeline._call_async", new_callable=AsyncMock)
-    async def test_extraction_restores_block_fragments_and_final_consolidation_at_cv_budget(self, call):
+    async def test_extraction_restores_single_leaf_at_cv_budget_and_validates_ambiguous_plan(self, call):
         async def fragment_then_profile(_system, payload, marker, max_output_tokens=None):
             request = json.loads(payload)
             self.assertEqual(max_output_tokens, 950)
@@ -65,16 +65,15 @@ class ProfileContractTests(unittest.IsolatedAsyncioTestCase):
         result = await process_cv_text("Synthetic CV", 12)
         self.assertEqual(result["profile_id"], "12")
         self.assertEqual(result["schema_version"], "candidate-profile.v2")
-        self.assertEqual(call.await_count, 2)
+        self.assertEqual(call.await_count, 1)
+        self.assertEqual(result["headline"], "Conductor")
         self.assertIn("-p-", call.await_args_list[0].args[2])
-        self.assertTrue(call.await_args_list[1].args[2].endswith("consolidation-plan"))
         self.assertIn("aliases compactos", call.await_args_list[0].args[0])
-        self.assertIn("identificador", call.await_args_list[1].args[0])
 
         async def wrong_identity(_system, _payload, marker, max_output_tokens=None):
             if marker.endswith("consolidation-plan"):
                 return {"v": "candidate-profile.v2", "id": "wrong"}
-            return {"h": None}
+            return {"l": [{"n": "Español"}, {"n": "español"}]}
         call.side_effect = wrong_identity
         with self.assertRaisesRegex(ValueError, "plan de consolidación"):
             await process_cv_text("Synthetic CV", 12)

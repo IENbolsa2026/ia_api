@@ -77,6 +77,46 @@ async def fake_provider(_system: str, payload: str, marker: str, *, on_heartbeat
 
 
 class CVPacketIsolationAcceptanceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_invalid_quote_is_retried_once_without_publishing_invalid_packet(self):
+        text = "Usé Excel para registrar facturas."
+        identity = identity_for(text, job_id=str(uuid4()), analysis_id=1101,
+                                candidate_id=73, cv_version_id=9201, source_salt="quote-retry")
+        packet_calls = []
+        snapshots = []
+
+        async def provider(system, payload, marker, *, on_heartbeat=None):
+            request = json.loads(payload)
+            if marker.endswith("consolidation-plan"):
+                return profile_plan(request)
+            packet_calls.append(system)
+            result = packet_fragment(request["text"], label="Excel")
+            if len(packet_calls) == 1:
+                result["sk"][0]["q"] = ["Texto inventado que no aparece en el CV"]
+            return result
+
+        result = await self.process(text, identity, provider=provider,
+                                    on_checkpoint=lambda value: snapshots.append(copy.deepcopy(value)))
+        self.assertEqual(len(packet_calls), 2)
+        self.assertIn("La respuesta anterior no pasó la validación", packet_calls[1])
+        self.assertEqual(result["skills"][0]["source_quotes"], [text])
+        self.assertNotIn("Texto inventado", json.dumps(snapshots))
+
+    async def test_repeated_invalid_quote_stops_after_two_calls(self):
+        text = "Usé Excel para registrar facturas."
+        identity = identity_for(text, job_id=str(uuid4()), analysis_id=1102,
+                                candidate_id=73, cv_version_id=9202, source_salt="quote-stop")
+        calls = []
+
+        async def provider(system, payload, marker, *, on_heartbeat=None):
+            calls.append(marker)
+            result = packet_fragment(text)
+            result["sk"][0]["q"] = ["Una cita inventada"]
+            return result
+
+        with self.assertRaises(ValueError):
+            await self.process(text, identity, provider=provider)
+        self.assertEqual(len(calls), 2)
+
     async def process(self, text, identity, *, checkpoint=None, on_checkpoint=None, provider=None):
         with patch.object(cv_pipeline, "_call_cv_provider", side_effect=provider or fake_provider):
             return await cv_pipeline.process_cv_text(

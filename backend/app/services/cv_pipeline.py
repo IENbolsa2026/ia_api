@@ -31,7 +31,7 @@ from app.services.rate_limiter import (
     retry_after_seconds,
 )
 
-CV_EXTRACTION_PROMPT_VERSION = "cv-extraction.v2-packets-soft.v2"
+CV_EXTRACTION_PROMPT_VERSION = "cv-extraction.v2-packets-soft.v6"
 OFFER_EXTRACTION_PROMPT_VERSION = "offer-extraction.v2"
 PROFILE_NORMALIZATION_PROMPT_VERSION = "profile-normalization.v2"
 
@@ -184,7 +184,11 @@ def _call_provider(system_prompt: str, user_payload: str, request_marker: str,
         return _call_openai(system_prompt, user_payload, request_marker, max_output_tokens)
     if provider == "groq":
         return _call_groq(system_prompt, user_payload, request_marker, max_output_tokens)
-    raise RuntimeError("LLM_PROVIDER must be 'openai' or 'groq'.")
+    if provider == "gemini":
+        from app.services.gemini_client import generate_json
+        response = generate_json(system_prompt, user_payload, request_marker, max_output_tokens)
+        return {**response['content'], '__provider_model': response['model']}
+    raise RuntimeError("LLM_PROVIDER must be 'openai', 'groq' or 'gemini'.")
 
 
 async def _call_async(system_prompt: str, payload: str, marker: str,
@@ -224,6 +228,9 @@ async def _call_cv_provider(
                 max_output_tokens=settings.CV_EXTRACTION_MAX_TOKENS,
             )
         except RateLimitExceeded as exc:
+            if exc.reason == "daily_budget" or exc.retry_after_seconds > 120:
+                # Defer the task instead of occupying the sole worker for hours.
+                raise
             if not exc.is_local_wait:
                 if consecutive_waits >= 5:
                     raise
@@ -260,7 +267,8 @@ async def process_cv_text(
         text=text,
         prompt_version=CV_EXTRACTION_PROMPT_VERSION,
         provider=settings.LLM_PROVIDER,
-        model=settings.OPENAI_MODEL if settings.LLM_PROVIDER.strip().lower() == "openai" else settings.CV_MODEL,
+        model=(settings.GEMINI_MODEL if settings.LLM_PROVIDER.strip().lower() == "gemini" else
+               settings.OPENAI_MODEL if settings.LLM_PROVIDER.strip().lower() == "openai" else settings.CV_MODEL),
         packet_chars=settings.CV_PACKET_CHARACTERS,
         block_chars=settings.CV_BLOQUE_CARACTERES,
         budget=settings.CV_EXTRACTION_MAX_TOKENS,

@@ -4,7 +4,7 @@ import unittest
 import json
 import hashlib
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from celery.exceptions import Retry
 
@@ -43,7 +43,8 @@ class TaskLockRetryTests(unittest.TestCase):
 
         self.assertEqual(store.update_owned.call_args.kwargs["rate_limit_stalls"], 0)
         self.assertEqual(retry.call_args.kwargs["max_retries"], 1000)
-        store.release_lock.assert_called_once_with("job-packets")
+        store.release_lock.assert_has_calls([call("job-packets"), call("__cv_serial__")])
+        self.assertEqual(store.release_lock.call_count, 2)
 
     def test_cv_worker_refreshes_terminal_state_after_lock_and_skips_inference(self):
         original = {"job_id": "job-race", "status": "accepted", "payload": {"kind": "candidate_cv"}}
@@ -65,7 +66,8 @@ class TaskLockRetryTests(unittest.TestCase):
         store.update_owned.assert_not_called()
         self.assertEqual(result, {"job_id": "job-race", "status": "completed"})
         self.assertNotIn("source_quotes", str(result))
-        store.release_lock.assert_called_once_with("job-race")
+        store.release_lock.assert_has_calls([call("job-race"), call("__cv_serial__")])
+        self.assertEqual(store.release_lock.call_count, 2)
 
     def test_completed_worker_return_does_not_expose_profile(self):
         state = {
