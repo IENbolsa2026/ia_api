@@ -188,8 +188,21 @@ def _merge_skill(rows: list[dict]) -> dict:
     concepts = {_normalize(row.get("ci")) for row in rows if row.get("ci") is not None}
     if len(concepts) > 1:
         raise IncompatibleFactGroup("El plan agrupó habilidades con identificadores de concepto distintos.")
-    if len(names) > 1 and (len(concepts) != 1 or any(row.get("ci") is None for row in rows)):
-        raise IncompatibleFactGroup("El plan agrupó habilidades distintas sin un concepto compartido verificable.")
+    if len(names) > 1:
+        # A shared model-supplied concept can be broader than both names. Only
+        # accept the unambiguous full-name/acronym case (IA/inteligencia
+        # artificial), otherwise keep both skills rather than lose one.
+        def acronym_pair(first: str, second: str) -> bool:
+            shorter, longer = sorted((first, second), key=len)
+            initials = ''.join(word[0] for word in re.findall(r'\b\w+\b', longer))
+            return ((len(shorter) >= 2 and shorter.isalpha() and shorter == initials)
+                    or longer == 'microsoft ' + shorter)
+
+        values = list(names)
+        if (len(values) != 2 or len(concepts) != 1
+                or any(row.get("ci") is None for row in rows)
+                or not acronym_pair(*values)):
+            raise IncompatibleFactGroup("El plan agrupó habilidades con nombres distintos.")
     return {
         "name": first["n"],
         "kind": _one_known(rows, "k", {"unknown"}) or "unknown",

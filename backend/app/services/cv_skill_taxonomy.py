@@ -115,11 +115,15 @@ def _training_only_quote(quote: str) -> bool:
     text = _key(quote).strip(' .;!?:')
     if not re.match(r'^cursos?(?:\s+|\s*:\s*)\S', text):
         return False
-    # A complete title is not practice. Additional sentences/project details or
-    # explicit first-person practice make this guard defer to source validation.
+    # A heading alone is not proof of competence. Once a quote contains a
+    # second clause, let the model's semantic judgment and source validation
+    # decide: a finite verb whitelist silently discarded valid practice such
+    # as "desarrollé" and "implementé" within training descriptions.
     if re.search(r'[.!?;\n]', quote.strip().rstrip(' .;!?:')):
         return False
-    return not re.search(r'\b(?:use|utilice|practique|prepare|aplique|realice|elabore)\b', text)
+    if re.search(r'\b(?:donde|en (?:el|la) (?:que|cual)|durante el cual|in which|where)\b', text):
+        return False
+    return not re.search(r'\b(?:use|utilice|practique|prepare|aplique|realice|elabore|desarrolle|implemente|aprendi|construi|cree|program[eé]|worked|built|developed|implemented|learned|used)\b', text)
 
 
 def normalize_expanded_skills(skills: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -98,7 +98,9 @@ class SoftSkillTaxonomyTests(unittest.TestCase):
         for quote in ('Curso de Excel. Usé Excel para preparar presupuestos.',
                       'Curso de Excel donde practiqué fórmulas y preparé presupuestos.',
                       'Curso de Excel\nProyecto final: presupuesto con fórmulas.',
-                      'Curso de Excel. Proyecto final: presupuesto con fórmulas.'):
+                      'Curso de Excel. Proyecto final: presupuesto con fórmulas.',
+                      'Curso de Excel donde desarrollé un presupuesto con fórmulas.',
+                      'Curso de Excel donde implementé una planilla de gastos.'):
             with self.subTest(quote=quote):
                 row = skill('Excel', kind='technical', quotes=[quote])
                 self.assertEqual(normalize_expanded_skills([row]), [row])

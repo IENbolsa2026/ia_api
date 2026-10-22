@@ -150,9 +150,21 @@ def new_manifest(text: str, identity: dict[str, Any]) -> dict[str, Any]:
     while start < len(text):
         end = min(len(text), start + packet_limit)
         if end < len(text):
-            newline = text.rfind("\n", start, end)
-            if newline >= start + max(1, int(packet_limit * 0.7)):
+            lower = start + max(1, int(packet_limit * 0.7))
+            # Prefer a paragraph boundary, then a sentence boundary. If the
+            # source has neither, split at the first word boundary in the last
+            # 30%, so a trailing technology/name is not severed mid-token.
+            newline = text.rfind("\n", lower, end)
+            if newline >= lower:
                 end = newline + 1
+            else:
+                boundary = next((pos + 1 for pos in range(lower, end)
+                                 if text[pos] in ".!?;" and text[pos + 1].isspace()), None)
+                if boundary is None:
+                    boundary = next((pos + 1 for pos in range(lower, end)
+                                     if text[pos].isspace()), None)
+                if boundary is not None:
+                    end = boundary
         index += 1
         packet = _packet(identity, index, f"r{index}", start, end, text)
         packets[packet["id"]] = packet
@@ -445,7 +457,7 @@ async def process_packetized_cv_text(
             return
         packet_text = text[packet["start"]:packet["end"]]
         quote_catalog = _quote_catalog(packet_text)
-        system_prompt = load_prompt("cv_extraction.v2.packets-soft.v7.system.md") + (
+        system_prompt = load_prompt("cv_extraction.v2.packets-soft.v8.system.md") + (
             "\nTarea: extraé hechos solo de este paquete y respondé con aliases compactos, sin identidad ni habilidades rechazadas."
         )
         payload = json.dumps({
@@ -476,7 +488,9 @@ async def process_packetized_cv_text(
                         "de ese texto de hasta 160 caracteres, sin cambios de conjugación ni ortografía. "
                         "No inventes evidencia para completar campos."
                         " El nombre n debe ser legible en español; los identificadores soft.* corresponden a ci, nunca a n."
-                        " Las blandas deben pertenecer a las diez categorías permitidas; no uses cargos, cursos ni títulos como skills."
+                        " Las blandas deben pertenecer a las diez categorías permitidas. No llames skill al cargo, curso o título;"
+                        " sí conservá una tecnología o conocimiento explícito dentro de ese texto: 'programador en Python' respalda Python."
+                        " No omitas herramientas nombradas en un stack ni tecnologías distintas por un ci genérico."
                         " Cada estudio ed debe traer q con citas del programa y su estado; conservá en curso/incompleto y no supongas graduación."
                     )
         except ProviderResponseTruncated:

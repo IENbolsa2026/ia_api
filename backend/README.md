@@ -11,7 +11,7 @@ cliente. El límite actual es 20 páginas PDF, 50 MiB descomprimidos para Office
 y 100.000 caracteres de texto. No se trunca contenido. El OCR queda fuera de
 alcance.
 
-El análisis del CV usa `cv-extraction.v2-packets-soft.v7` y mantiene el perfil ampliado
+El análisis del CV usa `cv-extraction.v2-packets-soft.v8` y mantiene el perfil ampliado
 `candidate-profile.v2`. Divide el texto en paquetes de hasta
 `CV_PACKET_CHARACTERS` (500 por defecto, limitado por `CV_BLOQUE_CARACTERES`).
 Cada llamada utiliza `CV_EXTRACTION_MAX_TOKENS` (950 por defecto). Si una salida
@@ -33,13 +33,22 @@ exactamente una vez. El plan efectivo final queda guardado y validado para
 evitar repetirlo tras una interrupción. Las escrituras requieren el propietario vigente del bloqueo.
 El limitador de cuota es global; los datos y resultados de los CV son por trabajo.
 
-La versión v7 limita las blandas a diez categorías canónicas, agrupa alias y
-separa competencias de cargos, títulos y cursos. Los estudios conservan
+La versión v8 conserva las diez categorías blandas y también recupera
+tecnologías o conocimientos explícitos dentro de un cargo (por ejemplo,
+«programador en Python»), de un stack o de una práctica descrita durante
+un curso. Un título de curso sin práctica ni conocimiento declarado no basta
+para crear una habilidad. Los estudios conservan
 `completion_status` (`completed`, `in_progress`, `incomplete`, `unknown`) y citas
 literales; no se deduce graduación de fechas ni de mencionar un programa. Estos
 campos son aditivos a `completed`, pero requieren actualizar ambas copias del
 contrato compartido (API y Django). El cambio no reescribe perfiles históricos:
 se debe solicitar un nuevo análisis para aplicar la nueva versión.
+
+Los paquetes iniciales se cortan en límites de palabra cuando no hay salto de
+línea ni fin de oración próximo; se evita dividir nombres como «Python» entre
+dos paquetes. La consolidación no une tecnologías distintas por un identificador
+de concepto genérico. La evaluación con CV sintéticos y sus límites está en
+`docs/EXTRACCION_CV_V8.md`.
 
 Las claves abreviadas se usan solo en el transporte con el modelo. El formato
 almacenado por Django y el que recibe el match conserva su contrato. Las llamadas

@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from app.core.config import settings
 from app.services import cv_pipeline
-from app.services.cv_packets import PacketsIdentityError, make_packet_identity
+from app.services.cv_packets import PacketsIdentityError, make_packet_identity, new_manifest
 from app.services.rate_limiter import ProviderResponseTruncated
 
 
@@ -38,6 +38,19 @@ def identity_for(text: str, *, job_id: str, analysis_id: int, candidate_id: int,
         block_chars=settings.CV_BLOQUE_CARACTERES,
         budget=settings.CV_EXTRACTION_MAX_TOKENS,
     )
+
+
+def test_initial_packets_keep_python_whole_without_newlines():
+    text = 'x' * 480 + ' Soy programador en Python. Trabajo con Django.'
+    identity = identity_for(text, job_id='word-boundary', analysis_id=1,
+                            candidate_id=1, cv_version_id=1, source_salt='synthetic')
+    manifest = new_manifest(text, identity)
+    spans = [text[node['start']:node['end']] for node in
+             (manifest['packets'][root] for root in manifest['roots'])]
+    assert ''.join(spans) == text
+    assert any('Python' in span for span in spans)
+    assert any('Django' in span for span in spans)
+    assert all('Pyth' not in span or 'Python' in span for span in spans)
 
 
 def profile_plan(request: dict) -> dict:

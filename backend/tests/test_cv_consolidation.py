@@ -21,6 +21,18 @@ def plan(**overrides):
 
 
 class CvConsolidationTests(unittest.TestCase):
+    def test_shared_generic_concept_does_not_collapse_distinct_languages(self):
+        fragments = [{"sk": [
+            {"n": "Python", "k": "technical", "ci": "technical.programming",
+             "e": ["Programa en Python"], "q": ["Python"]},
+            {"n": "Java", "k": "technical", "ci": "technical.programming",
+             "e": ["Programa en Java"], "q": ["Java"]},
+        ]}]
+        profile, effective = validate_and_build_profile_with_effective_plan(
+            plan(sk=[["sk0", "sk1"]]), fragments, 42)
+        self.assertEqual(effective["sk"], [["sk0"], ["sk1"]])
+        self.assertEqual([row["name"] for row in profile["skills"]], ["Python", "Java"])
+
     def test_plan_merges_compatible_skill_records_and_preserves_server_evidence(self):
         fragments = [
             {"sk": [{"n": "Python", "k": "technical", "l": "advanced", "o": "declared",

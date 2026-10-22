@@ -1,0 +1,227 @@
+[
+  {
+    "id": "desarrollador_python_explicito",
+    "text": "Soy programador en Python y automatizo reportes internos.",
+    "required_skills": [
+      [
+        "Python",
+        "Programación en Python"
+      ]
+    ],
+    "forbidden_skills": [],
+    "expected_education": []
+  },
+  {
+    "id": "stack_desarrollo_mixto",
+    "text": "Desarrollador de software: trabajé con C++, C#, .NET, Node.js y SQL en servicios de gestión.",
+    "required_skills": [
+      [
+        "C++"
+      ],
+      [
+        "C#"
+      ],
+      [
+        ".NET",
+        "Microsoft .NET"
+      ],
+      [
+        "Node.js",
+        "NodeJS"
+      ],
+      [
+        "SQL"
+      ]
+    ],
+    "forbidden_skills": [],
+    "expected_education": []
+  },
+  {
+    "id": "python_en_cargo",
+    "text": "Cargo: Analista de datos (Python). Preparé indicadores para el equipo comercial.",
+    "required_skills": [
+      [
+        "Python",
+        "Programación en Python"
+      ]
+    ],
+    "forbidden_skills": [],
+    "expected_education": []
+  },
+  {
+    "id": "herramientas_de_oficina",
+    "text": "Herramientas: Excel, Power BI y Jira. Coordiné el seguimiento semanal de incidencias.",
+    "required_skills": [
+      [
+        "Excel",
+        "Microsoft Excel"
+      ],
+      [
+        "Power BI"
+      ],
+      [
+        "Jira"
+      ]
+    ],
+    "forbidden_skills": [],
+    "expected_education": []
+  },
+  {
+    "id": "mecanica_y_soldadura",
+    "text": "Mecánico de taller. Realizo mantenimiento preventivo de motores y soldadura MIG en reparaciones de estructuras.",
+    "required_skills": [
+      [
+        "Mantenimiento preventivo de motores",
+        "Mantenimiento de motores"
+      ],
+      [
+        "Soldadura MIG",
+        "Soldadura"
+      ]
+    ],
+    "forbidden_skills": [],
+    "expected_education": []
+  },
+  {
+    "id": "ventas_atencion_excel",
+    "text": "Atendí consultas de clientes y concreté ventas en mostrador. Usé Excel para registrar pedidos.",
+    "required_skills": [
+      [
+        "Atención al cliente",
+        "Servicio al cliente"
+      ],
+      [
+        "Ventas",
+        "Venta"
+      ],
+      [
+        "Excel",
+        "Microsoft Excel"
+      ]
+    ],
+    "forbidden_skills": [],
+    "expected_education": []
+  },
+  {
+    "id": "enfermeria_procedimientos",
+    "text": "Enfermera en sala clínica: realicé curaciones y control de signos vitales según indicación profesional.",
+    "required_skills": [
+      [
+        "Curaciones",
+        "Cuidado de heridas"
+      ],
+      [
+        "Control de signos vitales",
+        "Toma de signos vitales"
+      ]
+    ],
+    "forbidden_skills": [],
+    "expected_education": []
+  },
+  {
+    "id": "tecnico_curso_en_curso",
+    "text": "Trabajo como electricista y utilizo un multímetro para revisar circuitos. Curso de instalaciones domiciliarias en curso; aún no hice trabajos prácticos del curso.",
+    "required_skills": [
+      [
+        "Multímetro",
+        "Multimetro"
+      ]
+    ],
+    "forbidden_skills": [
+      "Instalaciones domiciliarias",
+      "Cableado domiciliario"
+    ],
+    "expected_education": [
+      {
+        "field_contains": "instalaciones domiciliarias",
+        "status": "in_progress"
+      }
+    ]
+  },
+  {
+    "id": "doctorado_cursando_python",
+    "text": "Doctorado en Bioinformática en curso. En mi investigación desarrollo scripts de análisis con Python.",
+    "required_skills": [
+      [
+        "Python",
+        "Programación en Python"
+      ]
+    ],
+    "forbidden_skills": [],
+    "expected_education": [
+      {
+        "field_contains": "Bioinformática",
+        "status": "in_progress"
+      }
+    ]
+  },
+  {
+    "id": "negacion_java_python_afirmado",
+    "text": "No tengo conocimientos de Java; utilizo Python para procesar archivos de inventario.",
+    "required_skills": [
+      [
+        "Python",
+        "Programación en Python"
+      ]
+    ],
+    "forbidden_skills": [
+      "Java"
+    ],
+    "expected_education": []
+  },
+  {
+    "id": "aspiracion_futura",
+    "text": "Me interesa aprender React y Kubernetes en el futuro. Actualmente trabajo en soporte de impresoras.",
+    "required_skills": [
+      [
+        "Soporte técnico",
+        "Soporte de impresoras"
+      ]
+    ],
+    "forbidden_skills": [
+      "React",
+      "Kubernetes"
+    ],
+    "expected_education": []
+  },
+  {
+    "id": "aliases_habilidades_blandas",
+    "text": "Para entregar un proyecto a tiempo coordiné tareas con mis colegas, escuché sus propuestas, expliqué cambios con claridad, resolví desacuerdos, organicé prioridades, me adapté a un cambio de alcance, revisé cuidadosamente los datos, propuse mejoras, tomé decisiones con información incompleta y mantuve el foco en la meta del equipo.",
+    "required_skills": [
+      [
+        "Colaboración",
+        "Trabajo en equipo"
+      ],
+      [
+        "Comunicación",
+        "Comunicación efectiva"
+      ],
+      [
+        "Adaptabilidad al cambio",
+        "Adaptabilidad"
+      ],
+      [
+        "Proactividad",
+        "Iniciativa"
+      ]
+    ],
+    "forbidden_skills": [
+      "Organización",
+      "Gestión del tiempo",
+      "Atención al detalle"
+    ],
+    "expected_education": []
+  },
+  {
+    "id": "frase_python_exacta",
+    "text": "Soy programador en Python.",
+    "required_skills": [
+      [
+        "Python",
+        "Programación en Python"
+      ]
+    ],
+    "forbidden_skills": [],
+    "expected_education": []
+  }
+]
