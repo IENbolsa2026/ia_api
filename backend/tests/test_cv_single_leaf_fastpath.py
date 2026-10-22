@@ -13,7 +13,7 @@ from app.services.cv_consolidation import compact_facts_for_plan
 from app.services.rate_limiter import ProviderResponseTruncated
 
 
-SOURCE = "Registré facturas y concilié diferencias. Expliqué opciones a clientes."
+SOURCE = "Registré facturas y concilié diferencias. Expliqué opciones a clientes. Secundario finalizado."
 
 
 def fragment():
@@ -27,7 +27,7 @@ def fragment():
              "ci": "soft.communication"},
         ],
         "x": [{"t": "Auxiliar", "o": "Comercio sintético", "h": ["Registro de facturas"]}],
-        "ed": [{"l": "secondary", "c": True}], "l": [{"n": "Español", "l": "native"}],
+        "ed": [{"l": "secondary", "c": True, "q": ["Secundario finalizado."]}], "l": [{"n": "Español", "l": "native"}],
         "p": {"l": ["Ciudad sintética"], "w": ["onsite"]},
     }
 
@@ -115,7 +115,7 @@ class SingleLeafFastPathTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PacketsIdentityError):
             validate_manifest(tampered, SOURCE, self.identity())
 
-    async def test_duplicate_skill_concepts_fall_back_and_preserve_merged_evidence(self):
+    async def test_canonical_soft_aliases_merge_before_plan_and_preserve_evidence_without_extra_call(self):
         calls = []
 
         async def provider(_system, payload, marker, **_kwargs):
@@ -132,8 +132,8 @@ class SingleLeafFastPathTests(unittest.IsolatedAsyncioTestCase):
             ]}
 
         (profile, _), _ = await self.run_pipeline(provider)
-        self.assertEqual(len(calls), 2)
-        self.assertTrue(calls[-1].endswith("consolidation-plan"))
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(calls[-1].endswith("consolidation-plan"))
         self.assertEqual(len(profile["skills"]), 1)
         self.assertEqual(profile["skills"][0]["source_quotes"], ["Expliqué opciones", "clientes."])
 

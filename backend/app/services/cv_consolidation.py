@@ -27,7 +27,7 @@ class ConsolidationPlan(_PlanModel):
 SECTIONS = {
     "sk": ("skills", ("n", "k", "l", "o", "y", "ci")),
     "x": ("work_experience", ("t", "o", "m")),
-    "ed": ("education", ("l", "f", "i", "c")),
+    "ed": ("education", ("l", "f", "i", "c", "st", "q")),
     "l": ("languages", ("n", "l")),
     "c": ("credentials", ("n", "i", "d", "x", "o")),
 }
@@ -217,11 +217,15 @@ def _merge_experience(rows: list[dict]) -> dict:
 def _merge_education(rows: list[dict]) -> dict:
     for key, label in (("l", "level"), ("f", "field"), ("i", "institution")):
         _reject_conflicts(rows, key, f"education {label}", unknown_values={None, "unknown"}, incompatible=True)
+    _reject_conflicts(rows, 'c', 'education completion', incompatible=True)
+    _reject_conflicts(rows, 'st', 'education completion status', unknown_values={None, 'unknown'}, incompatible=True)
     return {
         "level": _one_known(rows, "l", {"unknown"}) or "unknown",
         "field": _one_known(rows, "f", {None}),
         "institution": _one_known(rows, "i", {None}),
         "completed": _one_known(rows, "c", {None}),
+        "completion_status": _one_known(rows, "st", {None, 'unknown'}) or 'unknown',
+        "source_quotes": _union_text_field(rows, 'q'),
     }
 
 

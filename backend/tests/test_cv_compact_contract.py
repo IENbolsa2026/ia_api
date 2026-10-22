@@ -24,7 +24,8 @@ class CompactCvContractTests(unittest.TestCase):
                 "job_title": "Chofer", "organization": "Ruta Sur", "duration_months": 48,
                 "highlights": ["Traslado de cargas en rutas nacionales."],
             }],
-            "education": [{"level": "technical", "field": "Logística", "institution": "Instituto Técnico", "completed": True}],
+            "education": [{"level": "technical", "field": "Logística", "institution": "Instituto Técnico", "completed": True,
+                           "completion_status": "unknown", "source_quotes": []}],
             "languages": [{"name": "Inglés", "level": "conversational"}],
             "preferences": {"locations": ["Buenos Aires"], "work_modes": ["onsite"]},
             "credentials": [{

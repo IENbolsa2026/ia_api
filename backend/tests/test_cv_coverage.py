@@ -16,6 +16,7 @@ from app.services.cv_compact_contract import validate_fragment
 from app.services.cv_consolidation import validate_and_build_profile_with_effective_plan
 from app.services.cv_packets import _quote_catalog, _resolve_quote_ids, validate_manifest
 from app.services.cv_pipeline import process_cv_text
+from app.services.cv_skill_taxonomy import SOFT_SKILL_TAXONOMY
 from ien_contracts.models import SkillLevel
 
 
@@ -39,12 +40,19 @@ class CoveragePipelineTests(unittest.IsolatedAsyncioTestCase):
                 supplied = rows_for(case)
                 checkpoints = []
                 quote_ids_by_skill = {}
+                attempts = []
 
                 async def provider(_system, payload, marker, max_output_tokens=None):
                     self.assertFalse(marker.endswith("consolidation-plan"))
                     request = json.loads(payload)
+                    attempts.append(marker)
                     result = {"h": "Perfil sintético", "s": "Experiencia sintética documentada.",
                               "sk": copy.deepcopy(supplied)}
+                    if len(attempts) == 1 and case.get('rejected_soft_skills'):
+                        result['sk'].extend({
+                            'n': item['name'], 'k': 'soft', 'o': item['origin'], 'l': item['level'],
+                            'ci': item['concept_id'], 'e': [item['evidence']], 'q': [item['quote_clue']],
+                        } for item in case['rejected_soft_skills'])
                     for skill in result["sk"]:
                         clue = skill["q"][0]
                         quote_id = next(key for key, span in request["source_quotes"].items() if clue in span)
@@ -57,7 +65,7 @@ class CoveragePipelineTests(unittest.IsolatedAsyncioTestCase):
                      patch.object(settings, "CV_EXTRACTION_MAX_TOKENS", 16384), \
                      patch("app.services.cv_pipeline._call_async", new_callable=AsyncMock, side_effect=provider) as call:
                     profile = await process_cv_text(case["text"], 42, on_checkpoint=checkpoints.append)
-                self.assertEqual(call.await_count, 1)
+                self.assertEqual(call.await_count, 2 if case.get('rejected_soft_skills') else 1)
                 skills = {item["name"]: item for item in profile["skills"]}
                 self.assertEqual(set(skills), {item["n"] for item in supplied})
                 self.assertEqual(len(profile["skills"]), len(supplied))
@@ -67,6 +75,8 @@ class CoveragePipelineTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn(saved["level"], {level.value for level in SkillLevel})
                     self.assertEqual(saved["origin"], row["o"])
                     self.assertEqual(saved["kind"], row["k"])
+                    if saved['kind'] == 'soft':
+                        self.assertIn(saved['name'], SOFT_SKILL_TAXONOMY)
                     self.assertEqual(saved["evidence"], row["e"])
                     self.assertIsNone(saved["years_experience"])
                     self.assertTrue(any(row["q"][0] in quote for quote in saved["source_quotes"]))
@@ -75,6 +85,11 @@ class CoveragePipelineTests(unittest.IsolatedAsyncioTestCase):
                 manifest = checkpoints[-1]
                 self.assertEqual(manifest["consolidation"]["result"], dict(profile))
                 validate_manifest(manifest, case["text"], manifest["identity"])
+                for excluded in case.get('rejected_soft_skills', []):
+                    self.assertNotIn(excluded['name'], skills)
+                    self.assertTrue(all(excluded['name'] != row.get('n') for snapshot in checkpoints
+                                        for node in snapshot['packets'].values()
+                                        for row in (node.get('result') or {}).get('sk', [])))
                 if case["id"] == "educacion_listas_y_acciones":
                     self.assertEqual(quote_ids_by_skill["Microsoft Word"], quote_ids_by_skill["Microsoft Excel"])
                     self.assertEqual(skills["Microsoft Word"]["source_quotes"], skills["Microsoft Excel"]["source_quotes"])

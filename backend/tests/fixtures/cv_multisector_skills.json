@@ -1,58 +1,315 @@
 [
   {
     "sector": "salud",
-    "text": "Comparé registros de atención y detecté discrepancias antes de entregar el informe.",
+    "text": "Comparé registros de atención y detecté discrepancias antes de entregar el informe. Cuestioné una indicación y contrasté sus supuestos con dos guías antes de aceptar que era válida.",
     "skills": [
-      {"n": "Pensamiento analítico", "k": "soft", "o": "inferred", "ci": "soft.analytical_thinking", "e": ["Compara información de registros para identificar diferencias."], "q": ["Comparé registros de atención y detecté discrepancias"]},
-      {"n": "Atención al detalle", "k": "soft", "o": "inferred", "ci": "soft.attention_to_detail", "e": ["Detecta discrepancias antes de entregar el informe."], "q": ["detecté discrepancias antes de entregar el informe"]}
+      {
+        "n": "Pensamiento crítico",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.critical_thinking",
+        "e": [
+          "Evalúa la validez de una indicación contrastando sus supuestos."
+        ],
+        "q": [
+          "Cuestioné una indicación y contrasté sus supuestos con dos guías"
+        ]
+      }
+    ],
+    "rejected_skills": [
+      {
+        "n": "Pensamiento analítico",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.analytical_thinking",
+        "e": [
+          "Compara información de registros para identificar diferencias."
+        ],
+        "q": [
+          "Comparé registros de atención y detecté discrepancias"
+        ]
+      },
+      {
+        "n": "Atención al detalle",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.attention_to_detail",
+        "e": [
+          "Detecta discrepancias antes de entregar el informe."
+        ],
+        "q": [
+          "detecté discrepancias antes de entregar el informe"
+        ]
+      }
     ]
   },
   {
     "sector": "comercio",
     "text": "Escuché las necesidades de compradores y expliqué alternativas adecuadas a su presupuesto.",
     "skills": [
-      {"n": "Orientación al cliente", "k": "soft", "o": "inferred", "ci": "soft.customer_orientation", "e": ["Atiende necesidades del comprador al ofrecer alternativas ajustadas a su presupuesto."], "q": ["Escuché las necesidades de compradores y expliqué alternativas adecuadas a su presupuesto"]},
-      {"n": "Comunicación", "k": "soft", "o": "inferred", "ci": "soft.communication", "e": ["Explica alternativas a compradores."], "q": ["expliqué alternativas adecuadas a su presupuesto"]}
+      {
+        "n": "Comunicación",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.communication",
+        "e": [
+          "Explica alternativas a compradores."
+        ],
+        "q": [
+          "expliqué alternativas adecuadas a su presupuesto"
+        ]
+      }
+    ],
+    "rejected_skills": [
+      {
+        "n": "Orientación al cliente",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.customer_orientation",
+        "e": [
+          "Atiende necesidades del comprador al ofrecer alternativas ajustadas a su presupuesto."
+        ],
+        "q": [
+          "Escuché las necesidades de compradores y expliqué alternativas adecuadas a su presupuesto"
+        ]
+      },
+      {
+        "n": "Comunicación",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.communication",
+        "e": [
+          "Explica alternativas a compradores."
+        ],
+        "q": [
+          "expliqué alternativas adecuadas a su presupuesto"
+        ]
+      }
     ]
   },
   {
     "sector": "operaciones",
-    "text": "Relacioné la recepción, el almacenamiento y el despacho para identificar dónde se acumulaban demoras.",
+    "text": "Relacioné la recepción, el almacenamiento y el despacho para identificar dónde se acumulaban demoras. Colaboré con recepción y despacho para revisar juntos las demoras.",
     "skills": [
-      {"n": "Pensamiento sistémico", "k": "soft", "o": "inferred", "ci": "soft.systems_thinking", "e": ["Conecta etapas del proceso y considera sus efectos sobre las demoras."], "q": ["Relacioné la recepción, el almacenamiento y el despacho para identificar dónde se acumulaban demoras"]}
+      {
+        "n": "Colaboración",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.collaboration",
+        "e": [
+          "Trabaja junto a recepción y despacho en la revisión de demoras."
+        ],
+        "q": [
+          "Colaboré con recepción y despacho"
+        ]
+      }
+    ],
+    "rejected_skills": [
+      {
+        "n": "Pensamiento sistémico",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.systems_thinking",
+        "e": [
+          "Conecta etapas del proceso y considera sus efectos sobre las demoras."
+        ],
+        "q": [
+          "Relacioné la recepción, el almacenamiento y el despacho para identificar dónde se acumulaban demoras"
+        ]
+      }
     ]
   },
   {
     "sector": "educación",
     "text": "Reorganicé una explicación y preparé ejemplos distintos después de escuchar las dudas del alumnado.",
     "skills": [
-      {"n": "Comunicación", "k": "soft", "o": "inferred", "ci": "soft.communication", "e": ["Reformula explicaciones y ejemplos a partir de las dudas recibidas."], "q": ["Reorganicé una explicación y preparé ejemplos distintos después de escuchar las dudas del alumnado"]},
-      {"n": "Adaptabilidad", "k": "soft", "o": "inferred", "ci": "soft.adaptability", "e": ["Modifica su explicación en respuesta a las dudas del alumnado."], "q": ["preparé ejemplos distintos después de escuchar las dudas del alumnado"]}
+      {
+        "n": "Comunicación",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.communication",
+        "e": [
+          "Reformula explicaciones y ejemplos a partir de las dudas recibidas."
+        ],
+        "q": [
+          "Reorganicé una explicación y preparé ejemplos distintos después de escuchar las dudas del alumnado"
+        ]
+      },
+      {
+        "n": "Adaptabilidad al cambio",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.adaptability",
+        "e": [
+          "Modifica su explicación en respuesta a las dudas del alumnado."
+        ],
+        "q": [
+          "preparé ejemplos distintos después de escuchar las dudas del alumnado"
+        ]
+      }
     ]
   },
   {
     "sector": "administración",
-    "text": "Clasifiqué expedientes por etapa y concilié registros para resolver diferencias entre documentos.",
+    "text": "Clasifiqué expedientes por etapa y concilié registros para resolver diferencias entre documentos. Propuse una revisión nueva para evitar que se repitieran las diferencias.",
     "skills": [
-      {"n": "Pensamiento estructurado", "k": "soft", "o": "inferred", "ci": "soft.structured_thinking", "e": ["Ordena expedientes usando su etapa como criterio."], "q": ["Clasifiqué expedientes por etapa"]},
-      {"n": "Resolución de problemas", "k": "soft", "o": "inferred", "ci": "soft.problem_solving", "e": ["Concilia registros para resolver diferencias documentales."], "q": ["concilié registros para resolver diferencias entre documentos"]}
+      {
+        "n": "Clasificación de expedientes",
+        "k": "technical",
+        "o": "inferred",
+        "ci": null,
+        "e": [
+          "Clasifica expedientes según la etapa."
+        ],
+        "q": [
+          "Clasifiqué expedientes por etapa"
+        ]
+      },
+      {
+        "n": "Conciliación de registros",
+        "k": "technical",
+        "o": "inferred",
+        "ci": null,
+        "e": [
+          "Concilia registros para resolver diferencias documentales."
+        ],
+        "q": [
+          "concilié registros para resolver diferencias entre documentos"
+        ]
+      },
+      {
+        "n": "Proactividad",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.proactivity",
+        "e": [
+          "Propone una revisión nueva para prevenir diferencias."
+        ],
+        "q": [
+          "Propuse una revisión nueva"
+        ]
+      }
+    ],
+    "rejected_skills": [
+      {
+        "n": "Pensamiento estructurado",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.structured_thinking",
+        "e": [
+          "Ordena expedientes usando su etapa como criterio."
+        ],
+        "q": [
+          "Clasifiqué expedientes por etapa"
+        ]
+      },
+      {
+        "n": "Resolución de problemas",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.problem_solving",
+        "e": [
+          "Concilia registros para resolver diferencias documentales."
+        ],
+        "q": [
+          "concilié registros para resolver diferencias entre documentos"
+        ]
+      }
     ]
   },
   {
     "sector": "tecnología",
-    "text": "Dividí una solución en partes y definí cómo intercambian información y qué depende de cada parte.",
+    "text": "Dividí una solución en partes y definí cómo intercambian información y qué depende de cada parte. Alfabetización en IA: contrasté la respuesta de un asistente con documentación y reconocí sus límites.",
     "skills": [
-      {"n": "Pensamiento estructurado", "k": "soft", "o": "inferred", "ci": "soft.structured_thinking", "e": ["Descompone una solución y define las funciones de sus partes."], "q": ["Dividí una solución en partes"]},
-      {"n": "Pensamiento sistémico", "k": "soft", "o": "inferred", "ci": "soft.systems_thinking", "e": ["Define intercambios de información y dependencias entre las partes."], "q": ["definí cómo intercambian información y qué depende de cada parte"]}
+      {
+        "n": "Diseño de soluciones",
+        "k": "technical",
+        "o": "inferred",
+        "ci": null,
+        "e": [
+          "Divide una solución en partes y define sus relaciones."
+        ],
+        "q": [
+          "Dividí una solución en partes"
+        ]
+      },
+      {
+        "n": "Alfabetización en IA",
+        "k": "soft",
+        "o": "declared",
+        "ci": "soft.ai_literacy",
+        "e": [
+          "Reconoce límites de un asistente y contrasta su respuesta con documentación."
+        ],
+        "q": [
+          "Alfabetización en IA"
+        ]
+      }
+    ],
+    "rejected_skills": [
+      {
+        "n": "Pensamiento estructurado",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.structured_thinking",
+        "e": [
+          "Descompone una solución y define las funciones de sus partes."
+        ],
+        "q": [
+          "Dividí una solución en partes"
+        ]
+      },
+      {
+        "n": "Pensamiento sistémico",
+        "k": "soft",
+        "o": "inferred",
+        "ci": "soft.systems_thinking",
+        "e": [
+          "Define intercambios de información y dependencias entre las partes."
+        ],
+        "q": [
+          "definí cómo intercambian información y qué depende de cada parte"
+        ]
+      }
     ]
   },
   {
     "sector": "títulos y herramientas sin acciones",
     "text": "Auxiliar administrativo. Docente. Cajero. Herramientas: Excel, Word, facturación.",
     "skills": [
-      {"n": "Excel", "k": "technical", "o": "declared", "e": ["Menciona Excel."], "q": ["Excel"]},
-      {"n": "Word", "k": "technical", "o": "declared", "e": ["Menciona Word."], "q": ["Word"]},
-      {"n": "Facturación", "k": "technical", "o": "declared", "e": ["Menciona facturación."], "q": ["facturación"]}
+      {
+        "n": "Excel",
+        "k": "technical",
+        "o": "declared",
+        "e": [
+          "Menciona Excel."
+        ],
+        "q": [
+          "Excel"
+        ]
+      },
+      {
+        "n": "Word",
+        "k": "technical",
+        "o": "declared",
+        "e": [
+          "Menciona Word."
+        ],
+        "q": [
+          "Word"
+        ]
+      },
+      {
+        "n": "Facturación",
+        "k": "technical",
+        "o": "declared",
+        "e": [
+          "Menciona facturación."
+        ],
+        "q": [
+          "facturación"
+        ]
+      }
     ]
   }
 ]

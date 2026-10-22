@@ -89,10 +89,10 @@ class LevelInferenceContractTests(unittest.IsolatedAsyncioTestCase):
     async def test_estimated_level_does_not_change_a_declared_skill_to_inferred(self):
         case = next(case for case in FIXTURE["cases"] if case["id"] == "operaciones_casos_complejos_autonomos")
         result, _ = await self.extract(case, [{
-            "n": "Pensamiento analítico", "k": "soft", "o": "inferred", "l": "advanced",
-            "e": ["Compara mediciones y descarta causas en fallas no rutinarias resueltas sin supervisión."],
-            "q": ["comparo mediciones, descarto causas y elijo la reparación"],
-            "ci": "soft.analytical_thinking",
+            "n": "Pensamiento crítico", "k": "soft", "o": "inferred", "l": "advanced",
+            "e": ["Cuestiona una explicación y contrasta sus supuestos ante casos no rutinarios sin supervisión."],
+            "q": ["Sin supervisión cuestioné una explicación y contrasté sus supuestos"],
+            "ci": "soft.critical_thinking",
         }])
         self.assertEqual([(skill["origin"], skill["level"]) for skill in result["skills"]],
                          [("declared", "advanced"), ("inferred", "advanced")])

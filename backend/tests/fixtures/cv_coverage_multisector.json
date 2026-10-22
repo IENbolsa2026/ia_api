@@ -1,40 +1,195 @@
 {
   "synthetic_only": true,
-  "purpose": "Dense generic inputs for live coverage evaluation; expectations identify supported concepts, not a fixed skill quota.",
+  "purpose": "Synthetic v7 closed-taxonomy fixtures. Out-of-taxonomy first responses must be rejected and retried; additional canonical actions are explicit, not aliases of excluded skills.",
   "cases": [
     {
       "id": "salud_equipos_y_procedimientos",
       "sector": "salud",
-      "text": "CV FICTICIO. Auxiliar de una residencia ficticia. Herramientas: termómetro, oxímetro, historia clínica electrónica. Realicé mediciones de temperatura con termómetro y de saturación con oxímetro siguiendo una guía y con supervisión. Registré cada medición en la historia clínica electrónica. Verifiqué los valores antes de guardarlos y detecté una diferencia de transcripción. Expliqué el procedimiento a residentes y respondí sus preguntas. Colaboré con enfermería para registrar los controles del turno. Ante un cambio de formulario aprendí sus campos y adapté el registro al nuevo procedimiento. No declaro idiomas, años por habilidad ni certificaciones.",
+      "text": "CV FICTICIO. Auxiliar de una residencia ficticia. Herramientas: termómetro, oxímetro, historia clínica electrónica. Realicé mediciones de temperatura con termómetro y de saturación con oxímetro siguiendo una guía y con supervisión. Registré cada medición en la historia clínica electrónica. Verifiqué los valores antes de guardarlos y detecté una diferencia de transcripción. Expliqué el procedimiento a residentes y respondí sus preguntas. Colaboré con enfermería para registrar los controles del turno. Ante un cambio de formulario aprendí sus campos y adapté el registro al nuevo procedimiento. No declaro idiomas, años por habilidad ni certificaciones. Me comprometí a completar y entregar cada registro y cumplí ese compromiso en todos los turnos.",
       "expected_atomics": [
-        {"name": "Termómetro", "aliases": ["Uso de termómetro"], "level": "beginner", "origin": "declared", "quote_clue": "con termómetro y de saturación con oxímetro", "evidence": "Realiza mediciones guiadas y supervisadas con termómetro: nivel inicial."},
-        {"name": "Oxímetro", "aliases": ["Uso de oxímetro"], "level": "beginner", "origin": "declared", "quote_clue": "con termómetro y de saturación con oxímetro", "evidence": "Realiza mediciones guiadas y supervisadas con oxímetro: nivel inicial."},
-        {"name": "Historia clínica electrónica", "aliases": ["Registro en historia clínica electrónica"], "level": "unknown", "origin": "declared", "quote_clue": "Registré cada medición en la historia clínica electrónica", "evidence": "Registra mediciones en historia clínica electrónica; no se detalla su dominio."}
+        {
+          "name": "Termómetro",
+          "aliases": [
+            "Uso de termómetro"
+          ],
+          "level": "beginner",
+          "origin": "declared",
+          "quote_clue": "con termómetro y de saturación con oxímetro",
+          "evidence": "Realiza mediciones guiadas y supervisadas con termómetro: nivel inicial."
+        },
+        {
+          "name": "Oxímetro",
+          "aliases": [
+            "Uso de oxímetro"
+          ],
+          "level": "beginner",
+          "origin": "declared",
+          "quote_clue": "con termómetro y de saturación con oxímetro",
+          "evidence": "Realiza mediciones guiadas y supervisadas con oxímetro: nivel inicial."
+        },
+        {
+          "name": "Historia clínica electrónica",
+          "aliases": [
+            "Registro en historia clínica electrónica"
+          ],
+          "level": "unknown",
+          "origin": "declared",
+          "quote_clue": "Registré cada medición en la historia clínica electrónica",
+          "evidence": "Registra mediciones en historia clínica electrónica; no se detalla su dominio."
+        }
       ],
       "expected_soft_supported": [
-        {"name": "Atención al detalle", "level": "unknown", "origin": "inferred", "quote_clue": "detecté una diferencia de transcripción", "evidence": "Verifica valores y detecta una diferencia de transcripción.", "concept_id": "soft.attention_to_detail"},
-        {"name": "Comunicación", "level": "unknown", "origin": "inferred", "quote_clue": "Expliqué el procedimiento a residentes y respondí sus preguntas", "evidence": "Explica el procedimiento y responde preguntas de residentes.", "concept_id": "soft.communication"},
-        {"name": "Trabajo en equipo", "level": "unknown", "origin": "inferred", "quote_clue": "Colaboré con enfermería", "evidence": "Colabora con enfermería en el registro de controles.", "concept_id": "soft.teamwork"},
-        {"name": "Aprendizaje continuo", "level": "unknown", "origin": "inferred", "quote_clue": "aprendí sus campos", "evidence": "Aprende los campos de un formulario nuevo.", "concept_id": "soft.continuous_learning"},
-        {"name": "Adaptabilidad", "level": "unknown", "origin": "inferred", "quote_clue": "adapté el registro al nuevo procedimiento", "evidence": "Adapta el registro ante el cambio de formulario.", "concept_id": "soft.adaptability"}
+        {
+          "name": "Comunicación",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Expliqué el procedimiento a residentes y respondí sus preguntas",
+          "evidence": "Explica el procedimiento y responde preguntas de residentes.",
+          "concept_id": "soft.communication"
+        },
+        {
+          "name": "Colaboración",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Colaboré con enfermería",
+          "evidence": "Colabora con enfermería en el registro de controles.",
+          "concept_id": "soft.collaboration"
+        },
+        {
+          "name": "Learnability",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "aprendí sus campos",
+          "evidence": "Aprende los campos de un formulario nuevo.",
+          "concept_id": "soft.learnability"
+        },
+        {
+          "name": "Adaptabilidad al cambio",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "adapté el registro al nuevo procedimiento",
+          "evidence": "Adapta el registro ante el cambio de formulario.",
+          "concept_id": "soft.adaptability"
+        },
+        {
+          "name": "Responsabilidad",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "cumplí ese compromiso en todos los turnos",
+          "evidence": "Cumple el compromiso de completar y entregar los registros.",
+          "concept_id": "soft.responsibility"
+        }
+      ],
+      "rejected_soft_skills": [
+        {
+          "name": "Atención al detalle",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "detecté una diferencia de transcripción",
+          "evidence": "Verifica valores y detecta una diferencia de transcripción.",
+          "concept_id": "soft.attention_to_detail"
+        }
       ]
     },
     {
       "id": "comercio_herramientas_y_operaciones",
       "sector": "comercio",
-      "text": "CV FICTICIO. Comercio de productos ficticios. Habilidades: sistema de punto de venta; lector de códigos de barras; inventario; cierre de caja. Opero cada día el sistema de punto de venta y el lector de códigos, y soy responsable de registrar ventas. Cuento existencias y actualizo el inventario semanal. Comparo el efectivo y los comprobantes para cerrar la caja. Pregunté qué necesitaba una compradora y expliqué las diferencias entre dos opciones. Resolví un reclamo revisando el pedido y acordando una reposición. Organicé las reposiciones por fecha y coordiné su preparación con depósito. No declaro años por habilidad ni niveles de idiomas.",
+      "text": "CV FICTICIO. Comercio de productos ficticios. Habilidades: sistema de punto de venta; lector de códigos de barras; inventario; cierre de caja. Opero cada día el sistema de punto de venta y el lector de códigos, y soy responsable de registrar ventas. Cuento existencias y actualizo el inventario semanal. Comparo el efectivo y los comprobantes para cerrar la caja. Pregunté qué necesitaba una compradora y expliqué las diferencias entre dos opciones. Resolví un reclamo revisando el pedido y acordando una reposición. Organicé las reposiciones por fecha y coordiné su preparación con depósito. No declaro años por habilidad ni niveles de idiomas. Ante reclamos reconocí mi frustración y la regulé antes de responder.",
       "expected_atomics": [
-        {"name": "Sistema de punto de venta", "aliases": ["Punto de venta", "POS"], "level": "intermediate", "origin": "declared", "quote_clue": "Opero cada día el sistema de punto de venta y el lector de códigos", "evidence": "Usa diariamente el sistema y responde por el registro de ventas: nivel intermedio."},
-        {"name": "Lector de códigos de barras", "aliases": ["Lector de códigos"], "level": "intermediate", "origin": "declared", "quote_clue": "Opero cada día el sistema de punto de venta y el lector de códigos", "evidence": "Usa diariamente el lector para registrar ventas bajo su responsabilidad: nivel intermedio."},
-        {"name": "Inventario", "aliases": ["Gestión de inventario", "Control de inventario"], "level": "unknown", "origin": "declared", "quote_clue": "Cuento existencias y actualizo el inventario semanal", "evidence": "Cuenta existencias y actualiza el inventario semanal; el alcance del dominio no se detalla."},
-        {"name": "Cierre de caja", "aliases": ["Arqueo de caja"], "level": "unknown", "origin": "declared", "quote_clue": "Comparo el efectivo y los comprobantes para cerrar la caja", "evidence": "Compara efectivo y comprobantes para cerrar la caja."}
+        {
+          "name": "Sistema de punto de venta",
+          "aliases": [
+            "Punto de venta",
+            "POS"
+          ],
+          "level": "intermediate",
+          "origin": "declared",
+          "quote_clue": "Opero cada día el sistema de punto de venta y el lector de códigos",
+          "evidence": "Usa diariamente el sistema y responde por el registro de ventas: nivel intermedio."
+        },
+        {
+          "name": "Lector de códigos de barras",
+          "aliases": [
+            "Lector de códigos"
+          ],
+          "level": "intermediate",
+          "origin": "declared",
+          "quote_clue": "Opero cada día el sistema de punto de venta y el lector de códigos",
+          "evidence": "Usa diariamente el lector para registrar ventas bajo su responsabilidad: nivel intermedio."
+        },
+        {
+          "name": "Inventario",
+          "aliases": [
+            "Gestión de inventario",
+            "Control de inventario"
+          ],
+          "level": "unknown",
+          "origin": "declared",
+          "quote_clue": "Cuento existencias y actualizo el inventario semanal",
+          "evidence": "Cuenta existencias y actualiza el inventario semanal; el alcance del dominio no se detalla."
+        },
+        {
+          "name": "Cierre de caja",
+          "aliases": [
+            "Arqueo de caja"
+          ],
+          "level": "unknown",
+          "origin": "declared",
+          "quote_clue": "Comparo el efectivo y los comprobantes para cerrar la caja",
+          "evidence": "Compara efectivo y comprobantes para cerrar la caja."
+        }
       ],
       "expected_soft_supported": [
-        {"name": "Orientación al cliente", "level": "unknown", "origin": "inferred", "quote_clue": "Pregunté qué necesitaba una compradora", "evidence": "Consulta la necesidad de la compradora para orientar la elección.", "concept_id": "soft.customer_orientation"},
-        {"name": "Comunicación", "level": "unknown", "origin": "inferred", "quote_clue": "expliqué las diferencias entre dos opciones", "evidence": "Explica diferencias entre opciones a una compradora.", "concept_id": "soft.communication"},
-        {"name": "Resolución de problemas", "level": "unknown", "origin": "inferred", "quote_clue": "Resolví un reclamo revisando el pedido y acordando una reposición", "evidence": "Resuelve el reclamo verificando el pedido y acordando la reposición.", "concept_id": "soft.problem_solving"},
-        {"name": "Organización", "level": "unknown", "origin": "inferred", "quote_clue": "Organicé las reposiciones por fecha", "evidence": "Organiza las reposiciones por fecha.", "concept_id": "soft.organization"},
-        {"name": "Trabajo en equipo", "level": "unknown", "origin": "inferred", "quote_clue": "coordiné su preparación con depósito", "evidence": "Coordina con depósito la preparación de reposiciones.", "concept_id": "soft.teamwork"}
+        {
+          "name": "Comunicación",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "expliqué las diferencias entre dos opciones",
+          "evidence": "Explica diferencias entre opciones a una compradora.",
+          "concept_id": "soft.communication"
+        },
+        {
+          "name": "Colaboración",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "coordiné su preparación con depósito",
+          "evidence": "Coordina con depósito la preparación de reposiciones.",
+          "concept_id": "soft.collaboration"
+        },
+        {
+          "name": "Inteligencia emocional",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "reconocí mi frustración y la regulé antes de responder",
+          "evidence": "Reconoce y regula su propia frustración antes de responder a un reclamo.",
+          "concept_id": "soft.emotional_intelligence"
+        }
+      ],
+      "rejected_soft_skills": [
+        {
+          "name": "Orientación al cliente",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Pregunté qué necesitaba una compradora",
+          "evidence": "Consulta la necesidad de la compradora para orientar la elección.",
+          "concept_id": "soft.customer_orientation"
+        },
+        {
+          "name": "Resolución de problemas",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Resolví un reclamo revisando el pedido y acordando una reposición",
+          "evidence": "Resuelve el reclamo verificando el pedido y acordando la reposición.",
+          "concept_id": "soft.problem_solving"
+        },
+        {
+          "name": "Organización",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Organicé las reposiciones por fecha",
+          "evidence": "Organiza las reposiciones por fecha.",
+          "concept_id": "soft.organization"
+        }
       ]
     },
     {
@@ -42,39 +197,202 @@
       "sector": "mantenimiento",
       "text": "CV FICTICIO. Mantenimiento de equipos ficticios. Herramientas y procedimientos: multímetro, llave dinamométrica, lubricación, alineación de ejes. Practiqué mediciones con multímetro y ajustes con llave dinamométrica con guía y supervisión. Realizo lubricación y alineación de ejes según listas de control. Ante vibraciones no rutinarias, sin supervisión comparé mediciones, descarté causas y elegí la corrección; las verificaciones posteriores confirmaron la reducción de vibración. Dividí la reparación en diagnóstico, preparación y verificación. Coordiné con producción la parada del equipo y ayudé a un colega en la prueba de arranque. Propuse incorporar una comprobación a la lista para prevenir el mismo error. No declaro matrícula ni años de dominio.",
       "expected_atomics": [
-        {"name": "Multímetro", "aliases": ["Uso de multímetro"], "level": "beginner", "origin": "declared", "quote_clue": "Practiqué mediciones con multímetro", "evidence": "Practica mediciones con guía y supervisión: nivel inicial."},
-        {"name": "Llave dinamométrica", "aliases": ["Uso de llave dinamométrica"], "level": "beginner", "origin": "declared", "quote_clue": "ajustes con llave dinamométrica con guía y supervisión", "evidence": "Practica ajustes con guía y supervisión: nivel inicial."},
-        {"name": "Lubricación", "level": "unknown", "origin": "declared", "quote_clue": "Realizo lubricación y alineación de ejes según listas de control", "evidence": "Realiza lubricación según listas de control; no se detalla el dominio."},
-        {"name": "Alineación de ejes", "level": "unknown", "origin": "declared", "quote_clue": "Realizo lubricación y alineación de ejes según listas de control", "evidence": "Realiza alineación de ejes según listas de control; no se detalla el dominio."}
+        {
+          "name": "Multímetro",
+          "aliases": [
+            "Uso de multímetro"
+          ],
+          "level": "beginner",
+          "origin": "declared",
+          "quote_clue": "Practiqué mediciones con multímetro",
+          "evidence": "Practica mediciones con guía y supervisión: nivel inicial."
+        },
+        {
+          "name": "Llave dinamométrica",
+          "aliases": [
+            "Uso de llave dinamométrica"
+          ],
+          "level": "beginner",
+          "origin": "declared",
+          "quote_clue": "ajustes con llave dinamométrica con guía y supervisión",
+          "evidence": "Practica ajustes con guía y supervisión: nivel inicial."
+        },
+        {
+          "name": "Lubricación",
+          "level": "unknown",
+          "origin": "declared",
+          "quote_clue": "Realizo lubricación y alineación de ejes según listas de control",
+          "evidence": "Realiza lubricación según listas de control; no se detalla el dominio."
+        },
+        {
+          "name": "Alineación de ejes",
+          "level": "unknown",
+          "origin": "declared",
+          "quote_clue": "Realizo lubricación y alineación de ejes según listas de control",
+          "evidence": "Realiza alineación de ejes según listas de control; no se detalla el dominio."
+        }
       ],
       "expected_soft_supported": [
-        {"name": "Pensamiento analítico", "level": "advanced", "origin": "inferred", "quote_clue": "sin supervisión comparé mediciones, descarté causas y elegí la corrección", "evidence": "Analiza causas de vibraciones no rutinarias y decide la corrección sin supervisión: nivel avanzado.", "concept_id": "soft.analytical_thinking"},
-        {"name": "Pensamiento estructurado", "level": "unknown", "origin": "inferred", "quote_clue": "Dividí la reparación en diagnóstico, preparación y verificación", "evidence": "Descompone la reparación en etapas de diagnóstico, preparación y verificación.", "concept_id": "soft.structured_thinking"},
-        {"name": "Trabajo en equipo", "level": "unknown", "origin": "inferred", "quote_clue": "ayudé a un colega en la prueba de arranque", "evidence": "Ayuda a un colega durante la prueba de arranque.", "concept_id": "soft.teamwork"},
-        {"name": "Iniciativa", "level": "unknown", "origin": "inferred", "quote_clue": "Propuse incorporar una comprobación a la lista", "evidence": "Propone una comprobación nueva para prevenir el mismo error.", "concept_id": "soft.initiative"}
+        {
+          "name": "Colaboración",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "ayudé a un colega en la prueba de arranque",
+          "evidence": "Ayuda a un colega durante la prueba de arranque.",
+          "concept_id": "soft.collaboration"
+        },
+        {
+          "name": "Proactividad",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Propuse incorporar una comprobación a la lista",
+          "evidence": "Propone una comprobación nueva para prevenir el mismo error.",
+          "concept_id": "soft.proactivity"
+        }
+      ],
+      "rejected_soft_skills": [
+        {
+          "name": "Pensamiento analítico",
+          "level": "advanced",
+          "origin": "inferred",
+          "quote_clue": "sin supervisión comparé mediciones, descarté causas y elegí la corrección",
+          "evidence": "Analiza causas de vibraciones no rutinarias y decide la corrección sin supervisión: nivel avanzado.",
+          "concept_id": "soft.analytical_thinking"
+        },
+        {
+          "name": "Pensamiento estructurado",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Dividí la reparación en diagnóstico, preparación y verificación",
+          "evidence": "Descompone la reparación en etapas de diagnóstico, preparación y verificación.",
+          "concept_id": "soft.structured_thinking"
+        }
       ]
     },
     {
       "id": "educacion_listas_y_acciones",
       "sector": "educación",
-      "text": "CV FICTICIO. Apoyo educativo en un centro ficticio. Herramientas declaradas: Microsoft Word, Microsoft Excel, Moodle, proyector. Uso Word para redactar guías y Excel para registrar asistencia. Publiqué materiales en Moodle y preparé el proyector para una actividad. Expliqué una consigna con ejemplos y cambié la explicación ante dudas del grupo. Organicé las actividades por fecha y prioricé la entrega que vencía primero. Revisé las planillas, detecté duplicados y propuse una validación para prevenirlos. Preparé una actividad junto con otra docente. Aprendí a publicar cuestionarios en una plataforma nueva y adapté el material al nuevo formato. No declaro idiomas, años por herramienta ni títulos adicionales.",
+      "text": "CV FICTICIO. Apoyo educativo en un centro ficticio. Herramientas declaradas: Microsoft Word, Microsoft Excel, Moodle, proyector. Uso Word para redactar guías y Excel para registrar asistencia. Publiqué materiales en Moodle y preparé el proyector para una actividad. Expliqué una consigna con ejemplos y cambié la explicación ante dudas del grupo. Organicé las actividades por fecha y prioricé la entrega que vencía primero. Revisé las planillas, detecté duplicados y propuse una validación para prevenirlos. Preparé una actividad junto con otra docente. Aprendí a publicar cuestionarios en una plataforma nueva y adapté el material al nuevo formato. No declaro idiomas, años por herramienta ni títulos adicionales. Ideé dos actividades originales con materiales reutilizados y probé sus formatos.",
       "expected_atomics": [
-        {"name": "Microsoft Word", "aliases": ["Word"], "level": "unknown", "origin": "declared", "quote_clue": "Uso Word para redactar guías y Excel para registrar asistencia", "evidence": "Usa Word para redactar guías; no se detalla su nivel de dominio."},
-        {"name": "Microsoft Excel", "aliases": ["Excel"], "level": "unknown", "origin": "declared", "quote_clue": "Uso Word para redactar guías y Excel para registrar asistencia", "evidence": "Usa Excel para registrar asistencia; no se detalla su nivel de dominio."},
-        {"name": "Moodle", "level": "unknown", "origin": "declared", "quote_clue": "Publiqué materiales en Moodle", "evidence": "Publica materiales en Moodle; no se detalla su nivel de dominio."},
-        {"name": "Proyector", "aliases": ["Uso de proyector"], "level": "unknown", "origin": "declared", "quote_clue": "preparé el proyector para una actividad", "evidence": "Prepara un proyector para una actividad; no se detalla su dominio."}
+        {
+          "name": "Microsoft Word",
+          "aliases": [
+            "Word"
+          ],
+          "level": "unknown",
+          "origin": "declared",
+          "quote_clue": "Uso Word para redactar guías y Excel para registrar asistencia",
+          "evidence": "Usa Word para redactar guías; no se detalla su nivel de dominio."
+        },
+        {
+          "name": "Microsoft Excel",
+          "aliases": [
+            "Excel"
+          ],
+          "level": "unknown",
+          "origin": "declared",
+          "quote_clue": "Uso Word para redactar guías y Excel para registrar asistencia",
+          "evidence": "Usa Excel para registrar asistencia; no se detalla su nivel de dominio."
+        },
+        {
+          "name": "Moodle",
+          "level": "unknown",
+          "origin": "declared",
+          "quote_clue": "Publiqué materiales en Moodle",
+          "evidence": "Publica materiales en Moodle; no se detalla su nivel de dominio."
+        },
+        {
+          "name": "Proyector",
+          "aliases": [
+            "Uso de proyector"
+          ],
+          "level": "unknown",
+          "origin": "declared",
+          "quote_clue": "preparé el proyector para una actividad",
+          "evidence": "Prepara un proyector para una actividad; no se detalla su dominio."
+        }
       ],
       "expected_soft_supported": [
-        {"name": "Comunicación", "level": "unknown", "origin": "inferred", "quote_clue": "Expliqué una consigna con ejemplos", "evidence": "Explica consignas mediante ejemplos y ajusta la explicación ante dudas.", "concept_id": "soft.communication"},
-        {"name": "Organización", "level": "unknown", "origin": "inferred", "quote_clue": "Organicé las actividades por fecha", "evidence": "Organiza las actividades por fecha.", "concept_id": "soft.organization"},
-        {"name": "Gestión del tiempo", "level": "unknown", "origin": "inferred", "quote_clue": "prioricé la entrega que vencía primero", "evidence": "Prioriza la entrega según el vencimiento.", "concept_id": "soft.time_management"},
-        {"name": "Atención al detalle", "level": "unknown", "origin": "inferred", "quote_clue": "Revisé las planillas, detecté duplicados", "evidence": "Revisa planillas y detecta duplicados.", "concept_id": "soft.attention_to_detail"},
-        {"name": "Iniciativa", "level": "unknown", "origin": "inferred", "quote_clue": "propuse una validación para prevenirlos", "evidence": "Propone una validación para prevenir duplicados.", "concept_id": "soft.initiative"},
-        {"name": "Trabajo en equipo", "level": "unknown", "origin": "inferred", "quote_clue": "Preparé una actividad junto con otra docente", "evidence": "Prepara una actividad en colaboración con otra docente.", "concept_id": "soft.teamwork"},
-        {"name": "Aprendizaje continuo", "level": "unknown", "origin": "inferred", "quote_clue": "Aprendí a publicar cuestionarios en una plataforma nueva", "evidence": "Aprende a publicar cuestionarios en una plataforma nueva.", "concept_id": "soft.continuous_learning"},
-        {"name": "Adaptabilidad", "level": "unknown", "origin": "inferred", "quote_clue": "adapté el material al nuevo formato", "evidence": "Adapta el material al formato de la plataforma nueva.", "concept_id": "soft.adaptability"}
+        {
+          "name": "Comunicación",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Expliqué una consigna con ejemplos",
+          "evidence": "Explica consignas mediante ejemplos y ajusta la explicación ante dudas.",
+          "concept_id": "soft.communication"
+        },
+        {
+          "name": "Proactividad",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "propuse una validación para prevenirlos",
+          "evidence": "Propone una validación para prevenir duplicados.",
+          "concept_id": "soft.proactivity"
+        },
+        {
+          "name": "Colaboración",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Preparé una actividad junto con otra docente",
+          "evidence": "Prepara una actividad en colaboración con otra docente.",
+          "concept_id": "soft.collaboration"
+        },
+        {
+          "name": "Learnability",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Aprendí a publicar cuestionarios en una plataforma nueva",
+          "evidence": "Aprende a publicar cuestionarios en una plataforma nueva.",
+          "concept_id": "soft.learnability"
+        },
+        {
+          "name": "Adaptabilidad al cambio",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "adapté el material al nuevo formato",
+          "evidence": "Adapta el material al formato de la plataforma nueva.",
+          "concept_id": "soft.adaptability"
+        },
+        {
+          "name": "Creatividad",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Ideé dos actividades originales con materiales reutilizados",
+          "evidence": "Idea actividades originales y prueba sus formatos.",
+          "concept_id": "soft.creativity"
+        }
       ],
-      "forbidden_combined_labels": ["Microsoft Word y Excel", "Word y Excel", "Microsoft Word y Microsoft Excel"]
+      "forbidden_combined_labels": [
+        "Microsoft Word y Excel",
+        "Word y Excel",
+        "Microsoft Word y Microsoft Excel"
+      ],
+      "rejected_soft_skills": [
+        {
+          "name": "Organización",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Organicé las actividades por fecha",
+          "evidence": "Organiza las actividades por fecha.",
+          "concept_id": "soft.organization"
+        },
+        {
+          "name": "Gestión del tiempo",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "prioricé la entrega que vencía primero",
+          "evidence": "Prioriza la entrega según el vencimiento.",
+          "concept_id": "soft.time_management"
+        },
+        {
+          "name": "Atención al detalle",
+          "level": "unknown",
+          "origin": "inferred",
+          "quote_clue": "Revisé las planillas, detecté duplicados",
+          "evidence": "Revisa planillas y detecta duplicados.",
+          "concept_id": "soft.attention_to_detail"
+        }
+      ]
     }
   ]
 }

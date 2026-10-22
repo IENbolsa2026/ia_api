@@ -104,6 +104,15 @@ class Education(StrictModel):
     field: str | None = Field(default=None, max_length=160)
     institution: str | None = Field(default=None, max_length=160)
     completed: bool | None = None
+    completion_status: Literal['completed', 'in_progress', 'incomplete', 'unknown'] = 'unknown'
+    source_quotes: list[str] = Field(default_factory=list, max_length=8)
+
+    @field_validator('source_quotes')
+    @classmethod
+    def education_quotes_must_be_nonempty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() or len(value) > 500 for value in values):
+            raise ValueError('Las citas de estudios deben contener entre 1 y 500 caracteres.')
+        return values
 
 
 class Language(StrictModel):

@@ -15,12 +15,14 @@ from ien_contracts.models import (
     SkillOrigin,
     WorkMode,
 )
+from app.services.cv_education_guard import ground_education, safe_academic_narrative, validate_credential_completion
+from app.services.cv_skill_taxonomy import normalize_expanded_skills
 
 
 logger = logging.getLogger(__name__)
 _SAFE_SCHEMA_PATH_PARTS = {
     "v", "id", "h", "s", "sk", "x", "ed", "l", "p", "c",
-    "n", "k", "o", "y", "e", "q", "ci", "t", "m", "f", "i", "d", "w",
+    "n", "k", "o", "y", "e", "q", "ci", "t", "m", "f", "i", "d", "w", "st",
 }
 
 
@@ -63,6 +65,8 @@ class WireEducation(_WireModel):
     field: str | None = Field(default=None, max_length=160, alias="f")
     institution: str | None = Field(default=None, max_length=160, alias="i")
     completed: bool | None = Field(default=None, alias="c")
+    completion_status: Literal['completed', 'in_progress', 'incomplete', 'unknown'] = Field(default='unknown', alias='st')
+    source_quotes: list[str] = Field(default_factory=list, max_length=8, alias='q')
 
 
 class WireLanguage(_WireModel):
@@ -139,6 +143,15 @@ def validate_fragment(raw: dict, source_block: str) -> tuple[dict, dict]:
         raise ValueError("El proveedor devolvió un fragmento compacto de CV inválido.") from None
     expanded = fragment.model_dump(mode="python")
     _validate_profile_evidence(expanded, source_block)
+    validate_credential_completion(expanded['credentials'])
+    expanded['skills'] = normalize_expanded_skills(expanded['skills'])
+    expanded['education'] = ground_education(expanded['education'], source_block)
+    expanded = safe_academic_narrative(expanded)
+    for field_name, model in (('skills', WireSkill), ('education', WireEducation)):
+        setattr(fragment, field_name, [model.model_validate({
+            field.alias or name: row[name] for name, field in model.model_fields.items() if name in row
+        }) for row in expanded[field_name]])
+    fragment.headline, fragment.summary = expanded['headline'], expanded['summary']
     return expanded, _dump_wire(fragment)
 
 
@@ -164,7 +177,13 @@ def expand_profile(raw: dict, source_text: str, candidate_id: int) -> dict:
 
 
 def validate_expanded_profile(profile: dict, source_text: str, candidate_id: int) -> dict:
-    """Validate a server-assembled candidate-profile.v2 without changing its facts."""
+    """Ground academic state and enforce the vocabulary before publishing a profile."""
+    validate_credential_completion(profile.get('credentials', []))
+    profile = safe_academic_narrative({
+        **profile,
+        'skills': normalize_expanded_skills(profile.get('skills', [])),
+        'education': ground_education(profile.get('education', []), source_text),
+    })
     try:
         validated = CandidateProfile.model_validate(profile)
     except ValidationError as exc:
@@ -240,6 +259,7 @@ def contract_profile_to_wire(profile: dict) -> dict:
             }),
             "ed": aliases(expanded.get("education", []), {
                 "level": "l", "field": "f", "institution": "i", "completed": "c",
+                "completion_status": "st", "source_quotes": "q",
             }),
             "l": aliases(expanded.get("languages", []), {"name": "n", "level": "l"}),
             "p": {"l": preferences.get("locations", []), "w": preferences.get("work_modes", [])},

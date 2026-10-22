@@ -52,7 +52,7 @@ def _quote_catalog(text: str) -> dict[str, str]:
 
 def _resolve_quote_ids(raw: dict, catalog: dict[str, str]) -> dict:
     value = copy.deepcopy(raw)
-    for section in ("sk", "c"):
+    for section in ("sk", "c", "ed"):
         entries = value.get(section, [])
         if not isinstance(entries, list):
             continue
@@ -445,7 +445,7 @@ async def process_packetized_cv_text(
             return
         packet_text = text[packet["start"]:packet["end"]]
         quote_catalog = _quote_catalog(packet_text)
-        system_prompt = load_prompt("cv_extraction.v2.packets-soft.v6.system.md") + (
+        system_prompt = load_prompt("cv_extraction.v2.packets-soft.v7.system.md") + (
             "\nTarea: extraé hechos solo de este paquete y respondé con aliases compactos, sin identidad ni habilidades rechazadas."
         )
         payload = json.dumps({
@@ -476,6 +476,8 @@ async def process_packetized_cv_text(
                         "de ese texto de hasta 160 caracteres, sin cambios de conjugación ni ortografía. "
                         "No inventes evidencia para completar campos."
                         " El nombre n debe ser legible en español; los identificadores soft.* corresponden a ci, nunca a n."
+                        " Las blandas deben pertenecer a las diez categorías permitidas; no uses cargos, cursos ni títulos como skills."
+                        " Cada estudio ed debe traer q con citas del programa y su estado; conservá en curso/incompleto y no supongas graduación."
                     )
         except ProviderResponseTruncated:
             left, right = _split_text_exact(packet_text)

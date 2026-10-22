@@ -106,6 +106,7 @@ class GeminiClientTests(unittest.TestCase):
                     if 'fragment_schema' in payload:
                         expected_shape['required'] = ['sk']
                         expected_shape['properties']['sk']['items']['required'] = ['n', 'k', 'l', 'o', 'e', 'q']
+                        expected_shape['properties']['ed']['items']['required'] = ['l', 'q']
                     self.assertEqual(config['responseJsonSchema'], expected_shape)
                 self.assertNotIn('responseSchema', config)
         self.assertEqual(self.post.call_count, 3)  # One request per admission; no hidden retry.
