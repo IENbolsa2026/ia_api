@@ -216,8 +216,9 @@ def _extract_docx(archive: zipfile.ZipFile) -> str:
             for node in xml:
                 if node.attrib.get("TargetMode", "").lower() == "external":
                     relationship_type = node.attrib.get("Type", "").lower()
-                    # Hyperlinks are inert text; templates and embedded resources are not.
-                    if not relationship_type.endswith("/hyperlink"):
+                    # Read packaged text only; never resolve hyperlink or attached
+                    # template targets, including local files and network shares.
+                    if not relationship_type.endswith(("/hyperlink", "/attachedtemplate")):
                         raise DocumentRejected("El documento contiene recursos externos no permitidos.")
     documents = [name for name in names if name == "word/document.xml" or re.fullmatch(r"word/(header|footer)\d+\.xml", name)]
     for document_name in sorted(documents):

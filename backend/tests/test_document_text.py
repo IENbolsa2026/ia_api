@@ -27,15 +27,44 @@ class DocumentTextTests(unittest.TestCase):
         cp = "Experiencia en logística".encode("cp1252")
         self.assertEqual(extract_document_text(cp, "txt"), "Experiencia en logística")
 
-    def test_docx_hyperlinks_are_inert_but_external_templates_are_rejected(self):
+    def test_docx_hyperlinks_and_external_templates_are_ignored_without_io(self):
         document = '<w:document xmlns:w="w"><w:body><w:p><w:r><w:t>LinkedIn</w:t></w:r></w:p></w:body></w:document>'
-        hyperlink_rel = '<Relationships xmlns="r"><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" TargetMode="External" Target="https://example.invalid"/></Relationships>'
-        external_template = '<Relationships xmlns="r"><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/attachedTemplate" TargetMode="External" Target="https://example.invalid/template.dotx"/></Relationships>'
-        normal = office_zip({"[Content_Types].xml": "<Types/>", "word/document.xml": document, "word/_rels/document.xml.rels": hyperlink_rel})
-        self.assertIn("LinkedIn", extract_document_text(normal, "docx"))
-        malicious = office_zip({"[Content_Types].xml": "<Types/>", "word/document.xml": document, "word/_rels/document.xml.rels": external_template})
+        targets = ('https://example.invalid/template.dotx', 'file:///C:/plantillas/cv.dotm', r'\\servidor\plantillas\cv.dotx')
+        for relationship_type in ('hyperlink', 'attachedTemplate'):
+            for target in targets:
+                with self.subTest(relationship_type=relationship_type, target=target):
+                    relationship = ('<Relationships xmlns="r"><Relationship '
+                        f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/{relationship_type}" '
+                        f'TargetMode="External" Target="{target}"/></Relationships>')
+                    payload = office_zip({"[Content_Types].xml": "<Types/>", "word/document.xml": document,
+                        "word/settings.xml": '<w:settings xmlns:w="w" xmlns:r="r"><w:attachedTemplate r:id="rId1"/></w:settings>',
+                        "word/_rels/settings.xml.rels": relationship})
+                    with patch('socket.socket.connect', side_effect=AssertionError('External network access')), \
+                         patch('pathlib.Path.open', side_effect=AssertionError('External file access')):
+                        self.assertEqual(detect_format('cv.docx', payload), 'docx')
+                        self.assertEqual(extract_document_text(payload, 'docx'), 'LinkedIn')
+
+    def test_docx_other_external_resources_remain_rejected(self):
+        for relationship_type in ('image', 'oleObject', 'aFChunk'):
+            with self.subTest(relationship_type=relationship_type):
+                relationship = ('<Relationships xmlns="r"><Relationship '
+                    f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/{relationship_type}" '
+                    'TargetMode="External" Target="https://example.invalid/resource"/></Relationships>')
+                payload = office_zip({'[Content_Types].xml': '<Types/>',
+                    'word/document.xml': '<w:document xmlns:w="w"><w:t>Ventas</w:t></w:document>',
+                    'word/_rels/document.xml.rels': relationship})
+                with self.assertRaisesRegex(DocumentRejected, 'recursos externos'):
+                    extract_document_text(payload, 'docx')
+
+    def test_docx_template_does_not_allow_macros_or_unsafe_relationship_xml(self):
+        entries = {'[Content_Types].xml': '<Types/>',
+            'word/document.xml': '<w:document xmlns:w="w"><w:t>Ventas</w:t></w:document>',
+            'word/_rels/settings.xml.rels': '<Relationships><Relationship Type="r/attachedTemplate" TargetMode="External" Target="file:///missing.dotx"/></Relationships>'}
         with self.assertRaises(DocumentRejected):
-            extract_document_text(malicious, "docx")
+            extract_document_text(office_zip({**entries, 'word/vbaProject.bin': b'macro'}), 'docx')
+        for xml in ('<Relationships><broken>', '<!DOCTYPE x [<!ENTITY e "bad">]><Relationships>&e;</Relationships>'):
+            with self.subTest(xml=xml), self.assertRaises(DocumentRejected):
+                extract_document_text(office_zip({**entries, 'word/_rels/settings.xml.rels': xml}), 'docx')
 
     def test_docx_dtd_and_archive_limits_are_rejected(self):
         malicious = office_zip({"[Content_Types].xml": "<Types/>", "word/document.xml": '<!DOCTYPE x [<!ENTITY e "bad">]><x>&e;</x>'})

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,21 @@ from app.services.document_extractor_runner import extract_in_subprocess
 
 
 class DocumentWorkerTests(unittest.TestCase):
+    def test_docx_with_attached_template_extracts_packaged_text_in_child(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'resume.docx'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('[Content_Types].xml', '<Types/>')
+                archive.writestr('word/document.xml',
+                    '<w:document xmlns:w="w"><w:body><w:p><w:r>'
+                    '<w:t>Experiencia en ventas.</w:t></w:r></w:p></w:body></w:document>')
+                archive.writestr('word/settings.xml',
+                    '<w:settings xmlns:w="w" xmlns:r="r"><w:attachedTemplate r:id="rId1"/></w:settings>')
+                archive.writestr('word/_rels/settings.xml.rels',
+                    '<Relationships><Relationship Id="rId1" Type="r/attachedTemplate" '
+                    'TargetMode="External" Target="https://example.invalid/missing.dotx"/></Relationships>')
+            self.assertEqual(extract_in_subprocess(path, 'docx'), 'Experiencia en ventas.')
+
     def test_txt_extraction_runs_in_resource_limited_child(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "resume.txt"
