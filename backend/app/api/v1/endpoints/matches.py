@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
@@ -35,6 +36,12 @@ def start(request: MatchRequest) -> dict:
 def create_match(request: MatchRequest, _: None = Depends(require_service_token)) -> dict:
     """Encola una comparación de perfiles en el mismo worker que analiza CVs."""
     return start(request)
+
+
+@router.post("/matches/{request_id}/cancel")
+def cancel_match(request_id: UUID, _: None = Depends(require_service_token)) -> dict:
+    job = MatchJobStore().cancel(str(request_id))
+    return {"request_id": str(request_id), "status": job["status"]}
 
 
 @router.get("/matches/{request_id}")
@@ -72,7 +79,7 @@ async def match_socket(websocket: WebSocket) -> None:
                     if job.get("error"):
                         message["error"] = job["error"]
                     await websocket.send_json(message)
-                    if job["status"] in {"completed", "failed"}:
+                    if job["status"] in {"completed", "failed", "cancelled"}:
                         request_id = None
             try:
                 message = await asyncio.wait_for(websocket.receive_json(), timeout=0.5)

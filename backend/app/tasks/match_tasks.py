@@ -7,7 +7,7 @@ from celery.exceptions import Retry
 
 from app.core.celery_app import celery_app
 from app.core.config import settings
-from app.services.match_job_store import MatchJobStore
+from app.services.match_job_store import MatchJobStore, MatchCancelled
 from app.services.job_store import LockOwnershipLost
 from app.services.match_groq import GroqClient
 from app.services.rate_limiter import RateLimitExceeded
@@ -25,8 +25,8 @@ def evaluate_match_task(self: Any, request_id: str) -> dict[str, Any]:
         return {"request_id": request_id, "status": "missing"}
     if job["status"] == "completed":
         return job["result"]
-    if job["status"] == "failed":
-        return {"request_id": request_id, "status": "failed"}
+    if job["status"] in {"failed", "cancelled"}:
+        return {"request_id": request_id, "status": job["status"]}
     if not store.acquire_lock(request_id):
         # No se confirma una redelivery mientras otro worker conserva el
         # lease: si ese worker cayó, este reintento retomará el trabajo al
@@ -49,8 +49,8 @@ def evaluate_match_task(self: Any, request_id: str) -> dict[str, Any]:
             return {"request_id": request_id, "status": "missing"}
         if job["status"] == "completed":
             return job["result"]
-        if job["status"] == "failed":
-            return {"request_id": request_id, "status": "failed"}
+        if job["status"] in {"failed", "cancelled"}:
+            return {"request_id": request_id, "status": job["status"]}
         update_owned(status="processing", error=None)
         request = job["request"]
         if request.get("protocol_version") == "match.v2":
@@ -68,6 +68,8 @@ def evaluate_match_task(self: Any, request_id: str) -> dict[str, Any]:
         result = build_result(request, response).model_dump(mode="json")
         update_owned(status="completed", result=result, provider_model=response.get("model", (settings.MATCH_GROQ_MODEL or settings.CV_MODEL)), usage=response.get("usage", {}))
         return result
+    except MatchCancelled:
+        return {"request_id": request_id, "status": "cancelled"}
     except Retry:
         raise
     except RateLimitExceeded as exc:

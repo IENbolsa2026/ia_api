@@ -15,7 +15,31 @@ from app.core.config import settings
 from app.services.job_store import LockOwnershipLost
 
 
+class MatchCancelled(RuntimeError):
+    pass
+
+
+_CANCEL_LUA = """
+local raw = redis.call('GET', KEYS[1])
+local job = {request_id=ARGV[1], status='cancelled'}
+if raw then
+  job = cjson.decode(raw)
+  if job.status == 'completed' or job.status == 'failed' or job.status == 'cancelled' then
+    return raw
+  end
+end
+redis.call('SET', KEYS[2], '1', 'EX', ARGV[2])
+job.status = 'cancelled'
+job.result = cjson.null
+job.error = cjson.null
+job.updated_at = ARGV[3]
+redis.call('SET', KEYS[1], cjson.encode(job), 'EX', ARGV[2])
+return cjson.encode(job)
+"""
+
+
 _UPDATE_OWNED_LUA = """
+if redis.call('EXISTS', KEYS[3]) == 1 then return -1 end
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   redis.call('SET', KEYS[2], ARGV[4], 'EX', ARGV[2])
   redis.call('EXPIRE', KEYS[1], ARGV[3])
@@ -49,6 +73,8 @@ class MatchJobStore:
 
     def create_or_get(self, request: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         request_id = str(request["request_id"])
+        if self.client.exists(f"jev-match:cancelled:{request_id}") == 1:
+            return self.get(request_id), False
         request_hash = content_hash(request)
         mapping_key = self._idempotency_key(request_id)
         current = self.client.get(mapping_key)
@@ -77,6 +103,8 @@ class MatchJobStore:
             job = self.get(request_id)
             if job is None:
                 raise RuntimeError("The match job expired before its mapping was saved.")
+            if job.get("status") == "cancelled":
+                return job, False
             if job["request_hash"] != request_hash:
                 raise ValueError("The request_id was already used with another payload.")
         if not self.client.set(mapping_key, request_id, ex=settings.JOB_TTL_SECONDS, nx=True):
@@ -86,6 +114,12 @@ class MatchJobStore:
     def get(self, request_id: str) -> dict[str, Any] | None:
         value = self.client.get(self._job_key(request_id))
         return json.loads(value) if value else None
+
+    def cancel(self, request_id: str) -> dict[str, Any]:
+        return json.loads(self.client.eval(
+            _CANCEL_LUA, 2, self._job_key(request_id), f"jev-match:cancelled:{request_id}",
+            request_id, settings.JOB_TTL_SECONDS, utc_now(),
+        ))
 
     def update(self, request_id: str, **changes: Any) -> dict[str, Any]:
         job = self.get(request_id)
@@ -113,9 +147,11 @@ class MatchJobStore:
         job.update(changes)
         job["updated_at"] = utc_now()
         updated = self.client.eval(
-            _UPDATE_OWNED_LUA, 2, f"jev-match:lock:{request_id}", self._job_key(request_id),
+            _UPDATE_OWNED_LUA, 3, f"jev-match:lock:{request_id}", self._job_key(request_id), f"jev-match:cancelled:{request_id}",
             token, settings.JOB_TTL_SECONDS, 600, json.dumps(job),
         )
+        if updated == -1:
+            raise MatchCancelled("La compatibilidad fue cancelada.")
         if not updated:
             raise LockOwnershipLost("Se perdió el lease antes de guardar la compatibilidad.")
         return job

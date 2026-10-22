@@ -180,7 +180,7 @@ class RecoveryIntegrityTests(unittest.TestCase):
         client.eval.return_value = 0
         with self.assertRaises(LockOwnershipLost):
             store.update_owned("match-lease", status="completed")
-        self.assertEqual(client.eval.call_args.args[4], token)
+        self.assertEqual(client.eval.call_args.args[5], token)
         store.release_lock("match-lease")
         self.assertEqual(client.eval.call_args.args[3], token)
         client.delete.assert_not_called()
