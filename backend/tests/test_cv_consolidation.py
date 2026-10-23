@@ -21,6 +21,17 @@ def plan(**overrides):
 
 
 class CvConsolidationTests(unittest.TestCase):
+    def test_broad_sales_name_merges_into_specific_name_with_same_concept(self):
+        fragments = [{'sk': [
+            {'n': 'Gestión de ventas', 'k': 'technical', 'ci': 'sales.sales',
+             'e': ['Gestionó ventas'], 'q': ['Gestión de ventas']},
+            {'n': 'Ventas', 'k': 'technical', 'ci': 'sales.sales',
+             'e': ['Cumplió objetivos'], 'q': ['Objetivos de ventas mensuales']},
+        ]}]
+        result = validate_and_build_profile(plan(sk=[['sk0', 'sk1']]), fragments, 42)
+        self.assertEqual([row['name'] for row in result['skills']], ['Gestión de ventas'])
+        self.assertEqual(len(result['skills'][0]['source_quotes']), 2)
+
     def test_shared_generic_concept_does_not_collapse_distinct_languages(self):
         fragments = [{"sk": [
             {"n": "Python", "k": "technical", "ci": "technical.programming",

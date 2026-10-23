@@ -32,6 +32,20 @@ class AcademicGroundingTests(unittest.TestCase):
                 self.assertIs(grounded['completed'], completed)
                 self.assertTrue(row['completed'])  # Does not mutate provider/cache input.
 
+    def test_abbreviated_licenciatura_cursada_is_preserved_without_awarding_degree(self):
+        source = 'Lic. en Comunicación social\ncursado 2016-2018 UNNE'
+        row = ground_education([{'level': 'bachelor', 'field': 'Comunicación social',
+                                 'source_quotes': [source]}], source)[0]
+        self.assertEqual(row['completion_status'], 'unknown')
+        self.assertIsNone(row['completed'])
+
+    def test_wrapped_course_keeps_its_name_and_explicit_completion(self):
+        source = 'Curso de análisis de datos -\nInnova finalizado 05/2026'
+        row = ground_education([{'level': 'other', 'field': 'Curso de análisis de datos',
+                                 'source_quotes': source.splitlines()}], source)[0]
+        self.assertEqual(row['field'], 'Curso de análisis de datos')
+        self.assertEqual(row['completion_status'], 'completed')
+
     def test_education_needs_a_literal_quote_for_the_relevant_level(self):
         for quotes in ([], ['Doctorado completado.'], ['Licenciatura en curso.']):
             with self.subTest(quotes=quotes), self.assertRaises(ValueError):
@@ -126,6 +140,23 @@ class AcademicGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'credencial obtenida'):
             validate_fragment({'c': [{'n': 'Certificado de primeros auxilios',
                 'e': ['Certificado obtenido'], 'q': [source]}]}, source)
+
+
+class ExplicitCourseTests(unittest.TestCase):
+    def test_explicit_courses_survive_even_when_provider_omits_them(self):
+        from app.services.cv_compact_contract import validate_expanded_profile
+        source = ('EDUCACIÓN\nCurso de conceptos básicos de\nMicrosoft Word y Excel\n'
+                  'Curso de análisis de datos -\nInnova finalizado 05/2026\n'
+                  'HABILIDADES\nManejo de caja.')
+        profile = {'schema_version': 'candidate-profile.v2', 'profile_id': '42',
+                   'headline': None, 'summary': None, 'skills': [], 'work_experience': [],
+                   'education': [], 'languages': [], 'preferences': {'locations': [], 'work_modes': []},
+                   'credentials': [], 'rejected_skills': []}
+        result = validate_expanded_profile(profile, source, 42)
+        self.assertEqual([row['field'] for row in result['education']],
+                         ['Curso de conceptos básicos de Microsoft Word y Excel', 'Curso de análisis de datos'])
+        self.assertEqual([row['completion_status'] for row in result['education']], ['unknown', 'completed'])
+        self.assertEqual(result['skills'], [])
 
 
 class AcademicPipelineTests(unittest.IsolatedAsyncioTestCase):

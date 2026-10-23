@@ -49,6 +49,17 @@ def _quote_catalog(text: str) -> dict[str, str]:
             if start + 160 >= len(sentence):
                 break
             start += 128
+    # A study/course name and its status often occupy two PDF lines. Keep a
+    # literal two-line quote so the model can cite both without paraphrasing.
+    lines = [line.strip() for line in text.splitlines()]
+    study_start = re.compile(
+        r'^(?:(?:curso|taller|seminario|licenciatura|doctorado|maestr[ií]a|'
+        r'secundario|tecnicatura|carrera)\b|lic\.\s)', re.I,
+    )
+    for first, second in zip(lines, lines[1:]):
+        pair = first + "\n" + second
+        if first and second and study_start.search(first) and len(pair) <= 160 and pair not in spans:
+            spans.append(pair)
     return {f"quote_{index}": span for index, span in enumerate(spans)}
 
 
@@ -145,12 +156,19 @@ def new_manifest(text: str, identity: dict[str, Any]) -> dict[str, Any]:
     packet_limit = min(int(identity["packet_chars"]), int(identity["block_chars"]))
     if packet_limit < 1:
         raise PacketsIdentityError()
+    # A short CV with two substantial page/column blocks deserves one pass per
+    # block. A single large prompt repeatedly omitted whole CV sections.
+    breaks = [match.end() for match in re.finditer(r'\n\n+', text)]
+    focused_break = (breaks[0] if len(breaks) == 1 and len(text) <= packet_limit
+                     and min(breaks[0], len(text) - breaks[0]) >= 400 else None)
     roots: list[str] = []
     packets: dict[str, dict[str, Any]] = {}
     start = 0
     index = 0
     while start < len(text):
         end = min(len(text), start + packet_limit)
+        if focused_break is not None and start < focused_break < end:
+            end = focused_break
         if end < len(text):
             lower = start + max(1, int(packet_limit * 0.7))
             # Prefer a paragraph boundary, then a sentence boundary. If the

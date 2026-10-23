@@ -174,12 +174,58 @@ def _extract_pdf(data: bytes) -> str:
         with pdfplumber.open(io.BytesIO(data)) as pdf:
             if len(pdf.pages) > settings.CV_MAX_PDF_PAGES:
                 raise DocumentRejected(f"El PDF supera el máximo de {settings.CV_MAX_PDF_PAGES} páginas.")
-            pieces = [page.extract_text() or "" for page in pdf.pages]
+            pieces = [_extract_pdf_page(page) for page in pdf.pages]
     except DocumentRejected:
         raise
     except Exception as exc:
         raise DocumentRejected("El archivo no es un PDF válido o no se pudo leer.") from exc
     return "\n\n".join(pieces)
+
+
+def _extract_pdf_page(page) -> str:
+    """Read true side-by-side columns separately to preserve section context."""
+    split = _pdf_column_break(page)
+    if split is None:
+        return page.extract_text() or ""
+    x0, top, x1, bottom = page.bbox
+    left = page.crop((x0, top, split, bottom)).extract_text() or ""
+    right = page.crop((split, top, x1, bottom)).extract_text() or ""
+    return "\n\n".join(part for part in (left, right) if part.strip())
+
+
+def _pdf_column_break(page) -> float | None:
+    """Find a central empty gutter shared by many simultaneous text lines.
+
+    A single-column page has words crossing the middle on many lines. Requiring
+    both a clear gutter and overlapping text on its sides avoids splitting it.
+    """
+    words = page.extract_words()
+    if len(words) < 50:
+        return None
+    x0, _top, x1, _bottom = page.bbox
+    width = x1 - x0
+    rows: dict[int, list[dict]] = {}
+    for word in words:
+        rows.setdefault(round(word["top"] / 4), []).append(word)
+    candidates = []
+    for step in range(61):
+        split = x0 + width * (0.38 + step * 0.004)
+        crossing = sum(word["x0"] < split < word["x1"] for word in words)
+        if crossing:
+            continue
+        left_count = sum(word["x1"] <= split for word in words)
+        right_count = len(words) - left_count
+        if min(left_count, right_count) < 25:
+            continue
+        simultaneous = 0
+        for row in rows.values():
+            left_edges = [word["x1"] for word in row if word["x1"] <= split]
+            right_edges = [word["x0"] for word in row if word["x0"] >= split]
+            if left_edges and right_edges and min(right_edges) - max(left_edges) >= 24:
+                simultaneous += 1
+        if simultaneous >= max(8, len(rows) // 5):
+            candidates.append((simultaneous, -abs(split - (x0 + x1) / 2), split))
+    return max(candidates)[2] if candidates else None
 
 
 def _extract_office(data: bytes, document_format: str) -> str:

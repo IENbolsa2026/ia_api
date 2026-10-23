@@ -32,7 +32,7 @@ from app.services.rate_limiter import (
     retry_after_seconds,
 )
 
-CV_EXTRACTION_PROMPT_VERSION = "cv-extraction.v2-packets-soft.v9-rag"
+CV_EXTRACTION_PROMPT_VERSION = "cv-extraction.v2-packets-soft.v11-courses"
 OFFER_EXTRACTION_PROMPT_VERSION = "offer-extraction.v2"
 PROFILE_NORMALIZATION_PROMPT_VERSION = "profile-normalization.v2"
 

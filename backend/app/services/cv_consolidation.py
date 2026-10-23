@@ -198,11 +198,19 @@ def _merge_skill(rows: list[dict]) -> dict:
             return ((len(shorter) >= 2 and shorter.isalpha() and shorter == initials)
                     or longer == 'microsoft ' + shorter)
 
+        def scoped_name_pair(first: str, second: str) -> bool:
+            shorter, longer = sorted((first, second), key=len)
+            return (longer.endswith(' de ' + shorter)
+                    and longer.startswith(('gestión de ', 'gestion de ', 'manejo de ',
+                                           'administración de ', 'administracion de ', 'operación de ',
+                                           'operacion de ', 'uso de ')))
+
         values = list(names)
         if (len(values) != 2 or len(concepts) != 1
                 or any(row.get("ci") is None for row in rows)
-                or not acronym_pair(*values)):
+                or not (acronym_pair(*values) or scoped_name_pair(*values))):
             raise IncompatibleFactGroup("El plan agrupó habilidades con nombres distintos.")
+        first = max(rows, key=lambda row: len(row['n']))
     return {
         "name": first["n"],
         "kind": _one_known(rows, "k", {"unknown"}) or "unknown",

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from app.core.config import settings
 from app.services.document_text import (
     DocumentRejected,
+    _extract_pdf_page,
     detect_format,
     extract_document_text,
 )
@@ -22,6 +23,47 @@ def office_zip(entries):
 
 
 class DocumentTextTests(unittest.TestCase):
+    def test_pdf_side_by_side_sections_are_not_interleaved(self):
+        words = []
+        for row in range(12):
+            top = row * 14
+            words.extend({'x0': x, 'x1': x + 20, 'top': top} for x in (40, 90, 140, 330, 380, 430))
+
+        class Page:
+            bbox = (0, 0, 600, 800)
+
+            def extract_words(self):
+                return words
+
+            def extract_text(self):
+                return 'education experience education experience'
+
+            def crop(self, bounds):
+                return SimpleNamespace(extract_text=lambda: 'education and courses' if bounds[0] == 0
+                                       else 'experience and skills')
+
+        self.assertEqual(_extract_pdf_page(Page()), 'education and courses\n\nexperience and skills')
+
+    def test_pdf_with_full_width_lines_keeps_normal_reading_order(self):
+        words = []
+        for row in range(12):
+            words.extend({'x0': x, 'x1': x + 25, 'top': row * 14}
+                         for x in range(40, 540, 35))
+
+        class Page:
+            bbox = (0, 0, 600, 800)
+
+            def extract_words(self):
+                return words
+
+            def extract_text(self):
+                return 'single-column text'
+
+            def crop(self, bounds):
+                raise AssertionError('Full-width text must not be split')
+
+        self.assertEqual(_extract_pdf_page(Page()), 'single-column text')
+
     def test_txt_accepts_utf8_and_windows_1252(self):
         self.assertEqual(detect_format("cv.txt", "Experiencia en logística".encode()), "txt")
         cp = "Experiencia en logística".encode("cp1252")

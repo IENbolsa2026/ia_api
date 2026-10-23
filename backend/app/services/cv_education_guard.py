@@ -33,7 +33,7 @@ _GRADUATED = re.compile(
 _LEVEL_ANCHORS = {
     'doctorate': r'\b(?:doctorado|doctor[ae]?|doctorand[oa]|doctoral|doctorate|ph\.?d\.?)\b',
     'master': r'\b(?:maestria|master|magister|msc)\b',
-    'bachelor': r'\b(?:licenciatura|licenciad[oa]|ingenieria|ingenier[oa]|grado|bachelor|bsc)\b',
+    'bachelor': r'\b(?:licenciatura|licenciad[oa]|ingenieria|ingenier[oa]|grado|bachelor|bsc)\b|\blic\.?\s+en\b',
     'secondary': r'\b(?:secundari[oa]|bachiller|secondary|high school)\b',
     'technical': r'\b(?:tecnic\w*|technical|vocacional)\b',
 }
@@ -42,7 +42,7 @@ _DEGREE_CLAIMS = {
     'master': re.compile(r'\bmagister en\b|\bcon (?:una? )?(?:maestria|master)\b'),
     'bachelor': re.compile(r'\b(?:licenciad[oa]|ingenier[oa]) en\b'),
 }
-_PROGRAM_START = re.compile(r'\b(?:doctorado|doctorate|phd|maestria|master|licenciatura|ingenieria|'
+_PROGRAM_START = re.compile(r'\b(?:doctorado|doctorate|phd|maestria|master|licenciatura|lic|ingenieria|'
                             r'tecnicatura|secundario|(?<!en )curso|certificado|certificacion|licencia|certification)\b')
 _STOP_WORDS = {'en', 'de', 'del', 'la', 'el', 'los', 'las', 'of', 'in', 'and', 'y',
                'curso', 'certificado', 'certificacion', 'licencia', 'doctorado', 'maestria', 'master',
@@ -57,7 +57,8 @@ def _contexts(quotes: list[str]) -> list[str]:
     """Separate adjacent programs even when a provider quote spans several."""
     result = []
     for quote in quotes:
-        text = _normalize(quote.replace('\n', '; ')).replace('ph.d.', 'phd')
+        text = _normalize(quote).replace('ph.d.', 'phd')
+        text = re.sub(r'\blic\.\s+en\b', 'lic en', text)
         for sentence in re.split(r'\.(?:\s+|$)|;', text):
             starts = list(_PROGRAM_START.finditer(sentence))
             boundaries = [0, *(match.start() for match in starts[1:]), len(sentence)]
@@ -68,7 +69,9 @@ def _contexts(quotes: list[str]) -> list[str]:
 def _study_context(row: dict, quotes: list[str]) -> list[str]:
     anchor = _LEVEL_ANCHORS.get(row.get('level'))
     field = _tokens(row.get('field') or '')
-    contexts = _contexts(quotes)
+    # PDF line wrapping often splits one program, its institution and its
+    # completion statement into separate literal quotes.
+    contexts = _contexts([' '.join(quotes)])
     if field:
         contexts = [context for context in contexts if field <= _tokens(context)]
     if anchor:
@@ -101,6 +104,36 @@ def ground_education(education: list[dict], source_text: str) -> list[dict]:
         status = statuses.pop() if len(statuses) == 1 else 'unknown'
         row['completion_status'] = status
         row['completed'] = True if status == 'completed' else False if status in {'in_progress', 'incomplete'} else None
+    return rows
+
+
+def retain_explicit_courses(education: list[dict], source_text: str) -> list[dict]:
+    """Recover clearly labeled courses a provider omitted, without inventing completion."""
+    rows = copy.deepcopy(education)
+    lines = [line.strip() for line in source_text.splitlines()]
+    for index, line in enumerate(lines):
+        if not re.match(r'^(?:curso|taller|seminario)\s+(?:de\s+|en\s+|sobre\s+)?\S', line, re.I):
+            continue
+        quote = line
+        if re.search(r'\b(?:de|del|en|y|sobre)\s*$|[-:]\s*$', line, re.I) and index + 1 < len(lines):
+            following = lines[index + 1]
+            if following and not re.match(r'^(?:curso|taller|seminario|educaci[oó]n|experiencia|habilidades)\b', following, re.I):
+                pair = line + '\n' + following
+                if len(pair) <= 160:
+                    quote = pair
+        title = re.split(r'\s+[-–:]\s+|\b(?:finalizad[oa]|completad[oa]|en curso|cursando)\b',
+                         quote.replace('\n', ' '), maxsplit=1, flags=re.I)[0].strip(' .,-–:')
+        if len(title) < 8 or len(title) > 160:
+            continue
+        title_tokens = _tokens(title)
+        if any(title_tokens <= _tokens(row.get('field') or '') or
+               _tokens(row.get('field') or '') >= title_tokens - {'basicos', 'basicas'}
+               for row in rows if row.get('field')):
+            continue
+        if len(rows) >= 20:
+            break
+        rows.append({'level': 'other', 'field': title, 'institution': None,
+                     'completed': None, 'completion_status': 'unknown', 'source_quotes': [quote]})
     return rows
 
 

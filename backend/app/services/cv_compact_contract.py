@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import html
 import re
 from typing import Literal
 
@@ -15,11 +16,25 @@ from ien_contracts.models import (
     SkillOrigin,
     WorkMode,
 )
-from app.services.cv_education_guard import ground_education, safe_academic_narrative, validate_credential_completion
+from app.services.cv_education_guard import ground_education, retain_explicit_courses, safe_academic_narrative, validate_credential_completion
 from app.services.cv_skill_taxonomy import normalize_expanded_skills
 
 
 logger = logging.getLogger(__name__)
+
+
+def _decode_generated_text(value, *, key: str = ''):
+    """Decode model-written HTML entities while preserving literal source quotes."""
+    if key in {'q', 'source_quotes'}:
+        return value
+    if isinstance(value, str):
+        decoded = html.unescape(value)
+        return html.unescape(decoded) if decoded != value else decoded
+    if isinstance(value, list):
+        return [_decode_generated_text(item) for item in value]
+    if isinstance(value, dict):
+        return {name: _decode_generated_text(item, key=name) for name, item in value.items()}
+    return value
 _SAFE_SCHEMA_PATH_PARTS = {
     "v", "id", "h", "s", "sk", "x", "ed", "l", "p", "c",
     "n", "k", "o", "y", "e", "q", "ci", "t", "m", "f", "i", "d", "w", "st",
@@ -123,7 +138,7 @@ def _dump_wire(value: _WireProfileFields) -> dict:
 def validate_fragment(raw: dict, source_block: str) -> tuple[dict, dict]:
     """Validate an aliased fragment and return expanded and compact forms."""
     try:
-        fragment = WireFragment.model_validate(raw)
+        fragment = WireFragment.model_validate(_decode_generated_text(raw))
     except ValidationError as exc:
         details = []
         for error in exc.errors(include_input=False, include_context=False, include_url=False):
@@ -144,7 +159,7 @@ def validate_fragment(raw: dict, source_block: str) -> tuple[dict, dict]:
     expanded = fragment.model_dump(mode="python")
     _validate_profile_evidence(expanded, source_block)
     validate_credential_completion(expanded['credentials'])
-    expanded['skills'] = normalize_expanded_skills(expanded['skills'])
+    expanded['skills'] = normalize_expanded_skills(expanded['skills'], source_text=source_block)
     expanded['education'] = ground_education(expanded['education'], source_block)
     expanded = safe_academic_narrative(expanded)
     for field_name, model in (('skills', WireSkill), ('education', WireEducation)):
@@ -164,7 +179,7 @@ def salvage_fragment(raw: dict, source_block: str) -> tuple[dict, dict, dict[str
     malformed transport objects.
     """
     try:
-        wire = WireFragment.model_validate(raw)
+        wire = WireFragment.model_validate(_decode_generated_text(raw))
     except ValidationError:
         raise ValueError("El proveedor devolvió un fragmento compacto de CV inválido.") from None
     data = wire.model_dump(mode="python", by_alias=True)
@@ -232,9 +247,9 @@ def validate_expanded_profile(profile: dict, source_text: str, candidate_id: int
     """Ground academic state and enforce the vocabulary before publishing a profile."""
     validate_credential_completion(profile.get('credentials', []))
     profile = safe_academic_narrative({
-        **profile,
-        'skills': normalize_expanded_skills(profile.get('skills', [])),
-        'education': ground_education(profile.get('education', []), source_text),
+        **_decode_generated_text(profile),
+        'skills': normalize_expanded_skills(_decode_generated_text(profile.get('skills', [])), source_text=source_text),
+        'education': ground_education(retain_explicit_courses(profile.get('education', []), source_text), source_text),
     })
     try:
         validated = CandidateProfile.model_validate(profile)

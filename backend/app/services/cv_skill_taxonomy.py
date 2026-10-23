@@ -123,10 +123,41 @@ def _training_only_quote(quote: str) -> bool:
         return False
     if re.search(r'\b(?:donde|en (?:el|la) (?:que|cual)|durante el cual|in which|where)\b', text):
         return False
-    return not re.search(r'\b(?:use|utilice|practique|prepare|aplique|realice|elabore|desarrolle|implemente|aprendi|construi|cree|program[eé]|worked|built|developed|implemented|learned|used)\b', text)
+    return not re.search(r'\b(?:use|uso|utilice|utilizo|manejo|practique|practico|prepare|aplique|aplico|realice|elabore|desarrolle|desarrollo|implemente|aprendi|construi|cree|programe|worked|built|developed|implemented|learned|used)\b', text)
 
 
-def normalize_expanded_skills(skills: list[dict[str, Any]]) -> list[dict[str, Any]]:
+_TRAINING_HEADINGS = {'educacion', 'formacion', 'formacion academica', 'estudios', 'cursos', 'capacitaciones'}
+
+
+def _training_only_in_source(quotes: list[str], source_text: str) -> bool:
+    """A line under education is training evidence, even when its course title wraps.
+
+    Layout-aware PDF extraction keeps headings and their following lines together.
+    A separate workplace or skills mention remains valid evidence for the skill.
+    """
+    ranges: list[tuple[int, int, bool]] = []
+    offset = 0
+    training = False
+    for line in source_text.splitlines(keepends=True):
+        label = _key(line).strip(' :-')
+        letters = ''.join(char for char in line if char.isalpha())
+        if letters and letters == letters.upper() and len(label) <= 60:
+            training = label in _TRAINING_HEADINGS
+        ranges.append((offset, offset + len(line), training))
+        offset += len(line)
+    if not ranges or not quotes:
+        return False
+    for quote in quotes:
+        if not quote or not _training_only_quote('Curso ' + quote):
+            return False
+        starts = [match.start() for match in re.finditer(re.escape(quote), source_text, re.I)]
+        if not starts or any(not next((is_training for start, end, is_training in ranges
+                                       if start <= position < end), False) for position in starts):
+            return False
+    return True
+
+
+def normalize_expanded_skills(skills: list[dict[str, Any]], *, source_text: str | None = None) -> list[dict[str, Any]]:
     """Canonicalize exact soft aliases and safely merge duplicate concepts.
 
     Apply after source/fragment validation, then revalidate the rebuilt compact
@@ -156,6 +187,8 @@ def normalize_expanded_skills(skills: list[dict[str, Any]]) -> list[dict[str, An
                        for value in [*validated.evidence, *validated.source_quotes])):
             raise SkillTaxonomyError('invalid_evidence')
         if all(_training_only_quote(quote) for quote in validated.source_quotes):
+            raise SkillTaxonomyError('training_only_evidence')
+        if source_text and _training_only_in_source(validated.source_quotes, source_text):
             raise SkillTaxonomyError('training_only_evidence')
         target = _BY_NAME.get(_key(name))
         concept = _key(validated.concept_id) if validated.concept_id else None

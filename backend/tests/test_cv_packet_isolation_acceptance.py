@@ -53,6 +53,22 @@ def test_initial_packets_keep_python_whole_without_newlines():
     assert all('Pyth' not in span or 'Python' in span for span in spans)
 
 
+def test_two_substantial_columns_receive_separate_packets_without_losing_text():
+    education = 'EDUCACIÓN\n' + ('Curso de administración y ventas.\n' * 18)
+    experience = 'EXPERIENCIA LABORAL\n' + ('Control de stock y atención a clientes.\n' * 18)
+    text = education + '\n\n' + experience
+    identity = identity_for(text, job_id='two-columns', analysis_id=1,
+                            candidate_id=1, cv_version_id=1, source_salt='synthetic')
+    identity['packet_chars'] = identity['block_chars'] = len(text) + 100
+    manifest = new_manifest(text, identity)
+    spans = [text[manifest['packets'][root]['start']:manifest['packets'][root]['end']]
+             for root in manifest['roots']]
+    assert len(spans) == 2
+    assert ''.join(spans) == text
+    assert 'EXPERIENCIA LABORAL' not in spans[0]
+    assert 'EDUCACIÓN' not in spans[1]
+
+
 def profile_plan(request: dict) -> dict:
     facts = request["facts"]
     return {

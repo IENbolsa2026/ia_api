@@ -4,6 +4,18 @@ from app.services.cv_compact_contract import contract_profile_to_wire, expand_pr
 
 
 class CompactCvContractTests(unittest.TestCase):
+    def test_generated_html_entities_are_decoded_but_literal_quotes_remain_unchanged(self):
+        source = 'Uso de sistema de facturación.'
+        expanded, _compact = validate_fragment({
+            's': 'Experiencia en facturaci&oacute;n.',
+            'sk': [{'n': 'Sistemas de facturaci&oacute;n', 'k': 'technical',
+                    'e': ['Uso de facturaci&oacute;n.'], 'q': [source]}],
+        }, source)
+        self.assertEqual(expanded['summary'], 'Experiencia en facturación.')
+        self.assertEqual(expanded['skills'][0]['name'], 'Sistemas de facturación')
+        self.assertEqual(expanded['skills'][0]['evidence'], ['Uso de facturación.'])
+        self.assertEqual(expanded['skills'][0]['source_quotes'], [source])
+
     def test_salvage_keeps_grounded_facts_without_inventing_studies_or_credentials(self):
         source = "Usé Excel para registrar ventas. Curso de Administración en curso."
         raw = {

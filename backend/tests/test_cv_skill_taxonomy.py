@@ -105,6 +105,18 @@ class SoftSkillTaxonomyTests(unittest.TestCase):
                 row = skill('Excel', kind='technical', quotes=[quote])
                 self.assertEqual(normalize_expanded_skills([row]), [row])
 
+    def test_wrapped_course_line_cannot_become_a_skill(self):
+        source = ('EDUCACIÓN\nCurso de conceptos básicos de\nMicrosoft Word y Excel\n'
+                  'HABILIDADES\nComunicación efectiva\nEXPERIENCIA\nUsé Excel para facturar.')
+        course_quote = 'Microsoft Word y Excel'
+        with self.assertRaises(SkillTaxonomyError) as error:
+            normalize_expanded_skills([skill('Microsoft Word', kind='technical',
+                                             quotes=[course_quote])], source_text=source)
+        self.assertEqual(error.exception.code, 'training_only_evidence')
+        # A separate statement of use supports Excel, but not Word.
+        self.assertEqual(len(normalize_expanded_skills([skill('Microsoft Excel', kind='technical',
+            quotes=['Usé Excel para facturar.'])], source_text=source)), 1)
+
     def test_alias_dedup_keeps_literal_evidence_quotes_origin_and_known_metadata(self):
         rows = [
             skill('Trabajo en equipo', concept='soft.teamwork', level='unknown', origin='inferred',

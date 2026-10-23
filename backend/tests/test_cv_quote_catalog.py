@@ -34,6 +34,14 @@ def test_quote_catalog_returns_literal_spans_with_unicode_and_long_sentences():
     assert all(covered)
 
 
+def test_quote_catalog_keeps_wrapped_study_and_status_together():
+    source = ('Lic. en Comunicación social\ncursado 2016-2018 UNNE\n'
+              'Curso de análisis de datos -\nInnova finalizado 05/2026')
+    values = set(_quote_catalog(source).values())
+    assert 'Lic. en Comunicación social\ncursado 2016-2018 UNNE' in values
+    assert 'Curso de análisis de datos -\nInnova finalizado 05/2026' in values
+
+
 def test_resolve_quote_ids_expands_skills_and_credentials_without_mutating_input():
     catalog = {"quote_0": "Trabajé con Python.", "quote_1": "Curso de redes. Último módulo."}
     raw = {
