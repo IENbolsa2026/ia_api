@@ -92,7 +92,9 @@ def evaluate_match_task(self: Any, request_id: str) -> dict[str, Any]:
             update_owned(status='failed', provider_failures=failures, error='No se pudo obtener cuota para completar la evaluación.')
             raise
         update_owned(status='rate_limited', provider_failures=failures)
-        raise self.retry(exc=exc, countdown=max(1, int(exc.retry_after_seconds) + 1), max_retries=max(1000, self.request.retries + 1)) from exc
+        # Groq's free TPM window can still be exhausted after a short Retry-After.
+        # Give the minute budget time to recover instead of burning all attempts.
+        raise self.retry(exc=exc, countdown=max(60, int(exc.retry_after_seconds) + 1), max_retries=max(1000, self.request.retries + 1)) from exc
     except self.MaxRetriesExceededError:
         update_owned(status="failed", error="No se pudo completar la evaluación de compatibilidad.")
         raise

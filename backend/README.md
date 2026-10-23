@@ -220,6 +220,8 @@ privado; conserva los secretos de integración entre servicios:
 
 ```dotenv
 LLM_PROVIDER=gemini
+MATCH_PROVIDER=groq
+MATCH_GROQ_MODEL=qwen/qwen3.8-27b
 GEMINI_API_KEY=tu-clave-privada-de-ai-studio
 GEMINI_MODEL=gemini-3.5-flash-lite
 # Ejemplo para cuota verificada de 15 RPM / 250.000 TPM / 500 RPD.
@@ -249,12 +251,12 @@ ensambla en código; múltiples hojas o ambigüedad conservan consolidación LLM
 Se divide antes de llamar si la entrada supera su presupuesto, o después si la
 salida queda truncada. Los callbacks reciben prioridad para entregar resultados.
 
-En Django usa `MATCH_MODEL_VERSION=gemini:gemini-3.5-flash-lite` para separar
-la caché del proveedor previo. `scripts/configure_ia_match.py` conserva el
-proveedor elegido y sincroniza ese valor. Reinicia API, worker y procesos Django
-después de cambiar la configuración, cuando no haya trabajos en curso. No guardes
-claves en código ni informes. Las referencias históricas a Groq en este documento
-describen el proveedor original; con `LLM_PROVIDER=gemini` el flujo usa Gemini.
+`MATCH_PROVIDER` es independiente de `LLM_PROVIDER`: en esta configuración Gemini
+extrae CV y Groq evalúa compatibilidad. Configurá `GROQ_API_KEY` en el `.env`
+privado. En Django usa `MATCH_MODEL_VERSION=groq:qwen/qwen3.8-27b:strict-low`;
+`scripts/configure_ia_match.py` sincroniza ese valor sin cambiar el proveedor
+de extracción. Reinicia API, worker y procesos Django después de cambiar la
+configuración, cuando no haya trabajos en curso. No guardes claves en código ni informes.
 
 ### 3. Preparar Django
 
@@ -430,10 +432,13 @@ La rama `ia-match` sirve todas las operaciones desde `app.main:app`, puerto 8001
 Las rutas de análisis y comparación usan el mismo `SERVICE_API_TOKEN`. El worker
 `celery -A app.core.celery_app.celery_app worker --pool=solo` procesa ambas clases
 de trabajo. `MATCH_GROQ_MODEL` permite elegir otro modelo para compatibilidad;
-si se omite usa `CV_MODEL`. El limitador Redis de Groq se comparte con extracción.
+si se omite usa `CV_MODEL`. El limitador Redis de Groq se comparte con extracción
+solo cuando la extracción también usa Groq. La evaluación usa JSON Schema estricto
+en Qwen 3.8, procesa hasta cuatro requisitos por llamada y calcula puntos por
+requisito con los pesos publicados en Django.
 El puerto 8002 y el paquete `jev_match_api` ya no forman parte del arranque.
 
-## Prompt y cálculo de compatibilidad v2
+## Prompt y cálculo de compatibilidad v3
 
 - `app/prompts/cv_extraction.v2.blocks.compact.system.md` y `cv_consolidation.v2.refs.system.md` y `offer_extraction.v2.system.md`
   estructuran CV y ofertas de cualquier rubro con textos visibles en español.

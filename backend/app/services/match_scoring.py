@@ -177,6 +177,14 @@ def _build_v2_result(request: dict[str, Any], provider_response: dict[str, Any])
             raise ValueError(f"El juicio del requisito {requirement_id} cita evidencia que no está en el perfil.")
         if state in {"met", "partial", "not_met"} and not evidence_refs:
             raise ValueError(f"El juicio del requisito {requirement_id} necesita evidencia para acreditar este estado.")
+        if state in {"met", "partial", "not_met"} and category in {"technical_skills", "soft_skills"} and not any(
+            ref.startswith(("/skills/", "/work_experience/")) for ref in evidence_refs
+        ):
+            state = "unknown"
+            evidence_refs = []
+            explanation = "La formación o el resumen no acreditan por sí solos esta habilidad en el perfil."
+        if state == "unknown":
+            evidence_refs = []
         mandatory = bool(requirement.get("mandatory", True)) and category != "desirables"
         if mandatory:
             mandatory_states.append(state)
@@ -210,8 +218,16 @@ def _build_v2_result(request: dict[str, Any], provider_response: dict[str, Any])
             effective_weight_bp=round(effective, 4),
             applicable=is_applicable,
         )
-        if key in weighted_dimensions:
-            total += (config.weights[key] / applicable_weight) * score
+    for assessment in assessments:
+        category = assessment.category.value if hasattr(assessment.category, 'value') else assessment.category
+        if category in weighted_dimensions:
+            possible = 100 * config.weights[category] / applicable_weight / len(scores_by_dimension[category])
+            assessment.points_possible = round(possible, 4)
+            assessment.points_awarded = round(possible * assessment.score, 4)
+            total += assessment.points_awarded
+        else:
+            assessment.points_possible = 0.0
+            assessment.points_awarded = 0.0
 
     known_count = sum(1 for item in assessments if item.status != "unknown")
     coverage = known_count / len(requirements) if requirements else 1.0
@@ -225,7 +241,7 @@ def _build_v2_result(request: dict[str, Any], provider_response: dict[str, Any])
     return MatchResult(
         schema_version="match-result.v2",
         request_id=request["request_id"],
-        match_percentage=round(total * 100, 2),
+        match_percentage=round(total, 2),
         coverage_percentage=round(coverage * 100, 2),
         confidence_percentage=None,
         confidence_available=False,

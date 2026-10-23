@@ -185,6 +185,31 @@ class MatchV2AcceptanceTests(unittest.TestCase):
         self.assertNotEqual(first.match_percentage, second.match_percentage)
         self.assertEqual(second.scoring_config.weights, changed)
 
+    def test_requirement_points_sum_to_the_displayed_match(self):
+        candidate = profile(skills=[{"name": "CRM", "level": "unknown", "evidence": ["Usó CRM"],
+                                    "source_quotes": ["Usó CRM"], "kind": "technical", "origin": "declared"}])
+        req = [requirement("crm"), requirement("excel"), requirement("exp", "experience")]
+        response = {"assessments": [
+            judgment("crm", "met", ["/skills/0/evidence/0"]),
+            judgment("excel", "unknown"),
+            judgment("exp", "partial", ["/skills/0/evidence/0"]),
+        ]}
+        weights = {key: 0 for key in WEIGHTS}
+        weights.update(technical_skills=7000, experience=3000)
+        result = build_result(scoring_request(req, candidate, weights), response)
+        self.assertEqual(result.match_percentage, 50)
+        self.assertEqual([a.points_awarded for a in result.assessments], [35, 0, 15])
+        self.assertEqual([a.points_possible for a in result.assessments], [35, 35, 30])
+        self.assertEqual(round(sum(a.points_awarded for a in result.assessments), 2), result.match_percentage)
+
+    def test_course_alone_never_scores_as_technical_skill(self):
+        candidate = profile(education=[{"level": "other", "field": "Curso de Excel", "completed": True}])
+        req = scoring_request([requirement("excel", name="Manejo de Excel")], candidate)
+        result = build_result(req, {"assessments": [judgment("excel", "partial", ["/education/0/field"])]})
+        self.assertEqual(result.match_percentage, 0)
+        self.assertEqual(result.assessments[0].status, "unknown")
+        self.assertEqual(result.assessments[0].evidence_refs, [])
+
 
 class ProfileAndOfferPipelineAcceptanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_profile_rejects_unsupported_skill_evidence_quotes_and_user_declared_output(self):

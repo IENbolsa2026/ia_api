@@ -30,6 +30,7 @@ class Settings(BaseSettings, extra="ignore"):
     API_VERSION: str = "v1"
     API_V1_STR: str = f"/api/{API_VERSION}"
     LLM_PROVIDER: str = "groq"
+    MATCH_PROVIDER: str = "groq"
     GROQ_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.5-flash-lite"

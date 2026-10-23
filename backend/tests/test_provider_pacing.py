@@ -167,12 +167,14 @@ class TaskPacingCounterTests(unittest.TestCase):
             store.update_owned.side_effect = lambda _request_id, **changes: state.update(changes)
             with patch('app.tasks.match_tasks.MatchJobStore', return_value=store), \
                  patch('app.tasks.match_tasks.GroqClient') as provider, \
-                 patch.object(evaluate_match_task, 'retry', side_effect=Retry('deferred')):
+                 patch.object(evaluate_match_task, 'retry', side_effect=Retry('deferred')) as retry:
                 provider.return_value.evaluate.side_effect = RateLimitExceeded(45)
                 evaluate_match_task.push_request(retries=50)
                 try:
                     with self.assertRaises(RateLimitExceeded if expected_terminal else Retry):
                         evaluate_match_task.run('synthetic')
+                    if not expected_terminal:
+                        self.assertGreaterEqual(retry.call_args.kwargs['countdown'], 60)
                 finally:
                     evaluate_match_task.pop_request()
             self.assertEqual(state['provider_failures'], previous_failures + 1)

@@ -237,7 +237,8 @@ class GeminiClientTests(unittest.TestCase):
         result = _call_provider('system', 'user', 'synthetic', 8192)
         self.assertEqual(result, {'sk': [], '__provider_model': 'gemini-3.5-flash-lite'})
 
-    def test_existing_matcher_routes_v1_and_v2_through_gemini_and_keeps_local_validation(self):
+    @patch.object(settings, 'MATCH_PROVIDER', 'gemini')
+    def test_matcher_can_explicitly_route_v1_and_v2_through_gemini(self):
         dimensions = {key: {'score': 3, 'confidence': .5} for key in (
             'mandatory_skills', 'experience', 'education_and_languages', 'preferences_and_desirables',
         )}

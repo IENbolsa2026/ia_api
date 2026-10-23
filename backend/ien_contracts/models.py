@@ -284,6 +284,8 @@ class RequirementAssessment(StrictModel):
     category: RequirementCategory | None = None
     source: str | None = None
     evidence_refs: list[str] = Field(default_factory=list, max_length=8)
+    points_awarded: float | None = Field(default=None, ge=0, le=100)
+    points_possible: float | None = Field(default=None, ge=0, le=100)
 
 
 class MatchDimensionBreakdown(StrictModel):
