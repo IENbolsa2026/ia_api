@@ -55,4 +55,3 @@ async def embed_passages(texts: Iterable[str], *, allow_download: bool = False) 
         return []
     return await asyncio.to_thread(_embed_texts, values, passage=True, allow_download=allow_download)
 
-\n
