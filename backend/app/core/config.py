@@ -50,6 +50,10 @@ class Settings(BaseSettings, extra="ignore"):
     CV_MODEL: str = "qwen/qwen3.8-27b"
     CV_BLOQUE_CARACTERES: int = 4000
     CV_PACKET_CHARACTERS: int = Field(default=500, ge=80, le=20000)
+    CV_RAG_CONTEXT_MAX_CHARACTERS: int = Field(default=16000, ge=8000, le=32000)
+    SKILL_CATALOG_DATABASE_URL: str = ""
+    SKILL_CATALOG_EMBEDDING_DIMENSIONS: int = Field(default=384, ge=1)
+    SKILL_CATALOG_EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     CV_EXTRACTION_MAX_TOKENS: int = Field(default=950, ge=1)
     GROQ_MAX_TOKENS: int = 6000
     GROQ_PAUSA_SEGUNDOS: int = 12

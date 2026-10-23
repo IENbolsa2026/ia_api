@@ -37,6 +37,7 @@ class ProfileContractTests(unittest.IsolatedAsyncioTestCase):
         prompt = call.call_args.args[0]
         self.assertIn("job-offer.v2", prompt)
         self.assertIn("obligatorio", prompt)
+        self.assertIn("## Extracción de oferta job-offer.v2", prompt)
 
     @patch("app.services.cv_pipeline._call_async", new_callable=AsyncMock)
     async def test_offer_keeps_original_requirement_conditions_by_id(self, call):

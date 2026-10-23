@@ -10,12 +10,14 @@ import logging
 import re
 from typing import Any
 
-from app.services.cv_compact_contract import validate_expanded_profile, validate_fragment
+from app.services.cv_compact_contract import salvage_fragment, validate_expanded_profile, validate_fragment
 from app.services.cv_consolidation import (
     ConsolidationPlan,
     compact_facts_for_plan,
     validate_and_build_profile_with_effective_plan,
 )
+from app.core.config import settings
+from app.services.skill_context import build_cv_skill_context
 from app.services.prompt_loader import load_prompt
 from app.services.rate_limiter import ProviderResponseTruncated
 
@@ -457,7 +459,10 @@ async def process_packetized_cv_text(
             return
         packet_text = text[packet["start"]:packet["end"]]
         quote_catalog = _quote_catalog(packet_text)
-        system_prompt = load_prompt("cv_extraction.v2.packets-soft.v8.system.md") + (
+        rag_context = await build_cv_skill_context(
+            packet_text, max_chars=settings.CV_RAG_CONTEXT_MAX_CHARACTERS,
+        )
+        system_prompt = load_prompt("cv_extraction.v2.packets-soft.v8.system.md") + "\n\n" + rag_context + (
             "\nTarea: extraé hechos solo de este paquete y respondé con aliases compactos, sin identidad ni habilidades rechazadas."
         )
         payload = json.dumps({
@@ -469,6 +474,7 @@ async def process_packetized_cv_text(
                 }, ensure_ascii=False)
         try:
             for attempt in range(2):
+                resolved = None
                 raw = await call_provider(
                     system_prompt, payload,
                     f"cv-packet-{identity['job_id']}-{packet_id}-validation-{attempt}",
@@ -476,11 +482,19 @@ async def process_packetized_cv_text(
                 )
                 provider_model = raw.pop("__provider_model", None)
                 try:
-                    _expanded, compact = validate_fragment(_resolve_quote_ids(raw, quote_catalog), packet_text)
+                    resolved = _resolve_quote_ids(raw, quote_catalog)
+                    _expanded, compact = validate_fragment(resolved, packet_text)
                     break
-                except ValueError:
+                except ValueError as validation_error:
                     if attempt:
-                        raise
+                        if resolved is None:
+                            raise
+                        try:
+                            _expanded, compact, dropped = salvage_fragment(resolved, packet_text)
+                        except ValueError:
+                            raise validation_error
+                        logger.warning("CV packet retained grounded facts after validation retry: dropped=%s", dropped)
+                        break
                     logger.info("CV packet validation retry id=%s", packet_id)
                     system_prompt += (
                         "\nLa respuesta anterior no pasó la validación. Volvé a extraer desde el texto original: "
@@ -492,6 +506,8 @@ async def process_packetized_cv_text(
                         " sí conservá una tecnología o conocimiento explícito dentro de ese texto: 'programador en Python' respalda Python."
                         " No omitas herramientas nombradas en un stack ni tecnologías distintas por un ci genérico."
                         " Cada estudio ed debe traer q con citas del programa y su estado; conservá en curso/incompleto y no supongas graduación."
+                        " ed.f debe usar palabras del programa presentes en esa misma cita, sin combinar cursos;"
+                        " cada elemento de x.h debe ser breve, no vacío y de 160 caracteres o menos."
                     )
         except ProviderResponseTruncated:
             left, right = _split_text_exact(packet_text)

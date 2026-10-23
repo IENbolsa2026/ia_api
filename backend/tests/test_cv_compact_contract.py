@@ -1,9 +1,37 @@
 import unittest
 
-from app.services.cv_compact_contract import contract_profile_to_wire, expand_profile, validate_fragment
+from app.services.cv_compact_contract import contract_profile_to_wire, expand_profile, salvage_fragment, validate_fragment
 
 
 class CompactCvContractTests(unittest.TestCase):
+    def test_salvage_keeps_grounded_facts_without_inventing_studies_or_credentials(self):
+        source = "Usé Excel para registrar ventas. Curso de Administración en curso."
+        raw = {
+            "sk": [
+                {"n": "Excel", "k": "technical", "e": ["Registró ventas"],
+                 "q": ["Usé Excel para registrar ventas."]},
+                {"n": "CRM", "k": "technical", "e": ["Usó CRM"], "q": ["No está en el CV"]},
+            ],
+            "ed": [{"l": "other", "f": "Administración y Marketing",
+                    "q": ["Curso de Administración en curso."]}],
+            "c": [{"n": "Certificado de ventas", "e": ["Obtenido"], "q": ["No está en el CV"]}],
+            "x": [{"t": "Vendedor", "h": ["Registró ventas. " * 15]}],
+        }
+        with self.assertRaises(ValueError):
+            validate_fragment(raw, source)
+        expanded, compact, dropped = salvage_fragment(raw, source)
+        self.assertEqual([skill["name"] for skill in expanded["skills"]], ["Excel"])
+        self.assertEqual(expanded["education"][0]["field"], None)
+        self.assertEqual(expanded["education"][0]["completion_status"], "in_progress")
+        self.assertEqual(expanded["credentials"], [])
+        self.assertLessEqual(len(compact["x"][0]["h"][0]), 160)
+        self.assertEqual(dropped, {"sk": 1, "ed": 0, "c": 1})
+
+    def test_salvage_rejects_a_fragment_with_no_grounded_facts(self):
+        with self.assertRaisesRegex(ValueError, "hechos verificables"):
+            salvage_fragment({"sk": [{"n": "CRM", "e": ["Usó CRM"],
+                                      "q": ["No está en el CV"]}]}, "Solo nombre.")
+
     def test_compact_and_expand_preserve_candidate_profile_v2_facts(self):
         source = (
             "Manejo de camiones. Operación segura de grúa. Empresa Ruta Sur. "

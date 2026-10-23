@@ -1,0 +1,20 @@
+services:
+  # Opt-in: isolated concept catalog, not the Django business database.
+  skill_catalog_postgres:
+    image: pgvector/pgvector:0.8.7-pg18-trixie
+    environment:
+      POSTGRES_DB: ien_skill_catalog
+      POSTGRES_USER: skill_catalog
+      POSTGRES_PASSWORD: ${SKILL_CATALOG_DB_PASSWORD:?Configurar SKILL_CATALOG_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - skill_catalog_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skill_catalog -d ien_skill_catalog"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  skill_catalog_data:

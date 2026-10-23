@@ -155,6 +155,58 @@ def validate_fragment(raw: dict, source_block: str) -> tuple[dict, dict]:
     return expanded, _dump_wire(fragment)
 
 
+def salvage_fragment(raw: dict, source_block: str) -> tuple[dict, dict, dict[str, int]]:
+    """After a failed model retry, retain only individually grounded facts.
+
+    A bad optional row must not discard every valid skill in a CV. This path
+    never invents a quote or awards a degree: it validates each row with the
+    same strict contract and removes rows that still fail. It is not used for
+    malformed transport objects.
+    """
+    try:
+        wire = WireFragment.model_validate(raw)
+    except ValidationError:
+        raise ValueError("El proveedor devolvió un fragmento compacto de CV inválido.") from None
+    data = wire.model_dump(mode="python", by_alias=True)
+    dropped: dict[str, int] = {}
+    for key in ("sk", "ed", "c"):
+        retained = []
+        dropped[key] = 0
+        for row in data[key]:
+            candidate = dict(row)
+            try:
+                validate_fragment({key: [candidate]}, source_block)
+            except ValueError:
+                if key == "ed" and candidate.get("f") is not None:
+                    # A paraphrased field is not source evidence. Keep the
+                    # actual quoted study if its level remains grounded.
+                    candidate["f"] = None
+                    try:
+                        validate_fragment({key: [candidate]}, source_block)
+                    except ValueError:
+                        dropped[key] += 1
+                        continue
+                else:
+                    dropped[key] += 1
+                    continue
+            retained.append(candidate)
+        data[key] = retained
+    for experience in data["x"]:
+        highlights = []
+        for highlight in experience.get("h", []):
+            if not highlight.strip():
+                continue
+            if len(highlight) > 160:
+                prefix = highlight[:160]
+                highlight = prefix.rsplit(" ", 1)[0] or prefix
+            highlights.append(highlight)
+        experience["h"] = highlights
+    expanded, compact = validate_fragment(data, source_block)
+    if not any(compact.get(key) for key in ("sk", "x", "ed", "l", "c")):
+        raise ValueError("El proveedor no devolvió hechos verificables del CV.")
+    return expanded, compact, dropped
+
+
 def expand_profile(raw: dict, source_text: str, candidate_id: int) -> dict:
     """Expand a strict compact profile into the existing candidate-profile.v2 contract."""
     try:

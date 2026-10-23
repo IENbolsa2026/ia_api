@@ -22,6 +22,7 @@ from ien_contracts.models import CandidateProfile, JobOffer, Requirement
 from app.core.config import settings
 from app.services.cv_compact_contract import validate_expanded_profile, validate_fragment
 from app.services.cv_packets import PacketsIdentityError, make_packet_identity, process_packetized_cv_text
+from app.services.skill_context import load_skill_instruction
 from app.services.rate_limiter import (
     ProviderOutputLimitExceeded,
     ProviderResponseTruncated,
@@ -31,7 +32,7 @@ from app.services.rate_limiter import (
     retry_after_seconds,
 )
 
-CV_EXTRACTION_PROMPT_VERSION = "cv-extraction.v2-packets-soft.v8"
+CV_EXTRACTION_PROMPT_VERSION = "cv-extraction.v2-packets-soft.v9-rag"
 OFFER_EXTRACTION_PROMPT_VERSION = "offer-extraction.v2"
 PROFILE_NORMALIZATION_PROMPT_VERSION = "profile-normalization.v2"
 
@@ -314,7 +315,7 @@ async def process_offer_snapshot(snapshot: dict[str, Any], offer_id: int) -> dic
     """Convierte el snapshot de Bolsa en el contrato job-offer.v2."""
 
     final = await _call_async(
-        load_prompt("offer_extraction.v2.system.md") + "\noffer_id debe coincidir con el valor suministrado. Esquema JSON:\n" + json.dumps(JobOffer.model_json_schema()),
+        load_prompt("offer_extraction.v2.system.md") + "\n\n" + load_skill_instruction("OFFER_FORMAT.md") + "\noffer_id debe coincidir con el valor suministrado. Esquema JSON:\n" + json.dumps(JobOffer.model_json_schema()),
         json.dumps({"offer_id": str(offer_id), "offer": snapshot}, ensure_ascii=False),
         f"offer-{offer_id}",
     )

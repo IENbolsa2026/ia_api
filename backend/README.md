@@ -11,7 +11,7 @@ cliente. El límite actual es 20 páginas PDF, 50 MiB descomprimidos para Office
 y 100.000 caracteres de texto. No se trunca contenido. El OCR queda fuera de
 alcance.
 
-El análisis del CV usa `cv-extraction.v2-packets-soft.v8` y mantiene el perfil ampliado
+El análisis del CV usa `cv-extraction.v2-packets-soft.v9-rag` y mantiene el perfil ampliado
 `candidate-profile.v2`. Divide el texto en paquetes de hasta
 `CV_PACKET_CHARACTERS` (500 por defecto, limitado por `CV_BLOQUE_CARACTERES`).
 Cada llamada utiliza `CV_EXTRACTION_MAX_TOKENS` (950 por defecto). Si una salida
@@ -49,6 +49,37 @@ línea ni fin de oración próximo; se evita dividir nombres como «Python» ent
 dos paquetes. La consolidación no une tecnologías distintas por un identificador
 de concepto genérico. La evaluación con CV sintéticos y sus límites está en
 `docs/EXTRACCION_CV_V8.md`.
+
+### Contexto RAG de habilidades
+
+La versión v9 carga instrucciones independientes desde `app/prompts/skills/`:
+criterio general, formato compacto de perfil, taxonomía blanda y guías de
+perfil técnico o comercial cuando el texto lo justifica. Busca conceptos
+relevantes en `app/data/skill_catalog.v1.json` y, si está configurado, en un
+PostgreSQL aislado con pgvector. El catálogo define conceptos y contraejemplos;
+el modelo recibe el texto original del CV y debe citarlo para declarar cada
+habilidad. El catálogo no guarda CV, embeddings de CV ni identidades.
+
+Para habilitar la búsqueda híbrida local, definir `SKILL_CATALOG_DB_PASSWORD`
+y `SKILL_CATALOG_DATABASE_URL` en el `.env` privado. En esta instalación local
+el DSN apunta a `postgresql://skill_catalog:<contraseña>@127.0.0.1:5434/ien_skill_catalog`.
+Luego, desde `backend`, ejecutar:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.rag.yml up -d skill_catalog_postgres
+.venv\Scripts\python.exe -m tools.import_skill_catalog app\data\skill_catalog.v1.json --initialize --embed
+```
+
+`--embed` descarga una vez el modelo multilingüe liviano y genera vectores
+localmente; las consultas normales usan la caché local sin descargar. La
+importación es explícita e idempotente. Un catálogo propio JSON/CSV puede
+añadirse con el mismo comando sin `--initialize`; `--replace` elimina primero
+los conceptos anteriores y requiere una decisión consciente. La búsqueda
+combina nombres exactos, texto y similitud vectorial; si la base o el modelo
+no están disponibles, continúa con el catálogo local. `CV_RAG_CONTEXT_MAX_CHARACTERS`
+acota el contexto adicional por llamada. En Docker, si también se ejecuta el
+worker en la red de Compose, el host del DSN debe ser
+`skill_catalog_postgres:5432`.
 
 Las claves abreviadas se usan solo en el transporte con el modelo. El formato
 almacenado por Django y el que recibe el match conserva su contrato. Las llamadas
