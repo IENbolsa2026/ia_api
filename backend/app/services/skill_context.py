@@ -140,4 +140,3 @@ async def build_cv_skill_context(text: str, *, max_chars: int = 16000,
     finally:
         if own_store:
             await catalog.close()
-
