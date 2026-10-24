@@ -114,6 +114,7 @@ def candidate_evidence_index(profile: dict[str, Any]) -> dict[str, str]:
     groups = {
         "skills": ("name", "level", "years_experience", "kind", "origin", "concept_id", "evidence", "source_quotes"),
         "work_experience": ("job_title", "organization", "duration_months", "highlights"),
+        "projects": ("name", "highlights", "source_quotes"),
         "education": ("level", "field", "institution", "completed"),
         "languages": ("name", "level"),
         "credentials": ("name", "issuer", "issued_at", "expires_at", "evidence", "source_quotes"),
@@ -178,7 +179,7 @@ def _build_v2_result(request: dict[str, Any], provider_response: dict[str, Any])
         if state in {"met", "partial", "not_met"} and not evidence_refs:
             raise ValueError(f"El juicio del requisito {requirement_id} necesita evidencia para acreditar este estado.")
         if state in {"met", "partial", "not_met"} and category in {"technical_skills", "soft_skills"} and not any(
-            ref.startswith(("/skills/", "/work_experience/")) for ref in evidence_refs
+            ref.startswith(("/skills/", "/work_experience/", "/projects/")) for ref in evidence_refs
         ):
             state = "unknown"
             evidence_refs = []

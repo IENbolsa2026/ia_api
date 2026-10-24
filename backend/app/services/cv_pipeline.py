@@ -32,7 +32,7 @@ from app.services.rate_limiter import (
     retry_after_seconds,
 )
 
-CV_EXTRACTION_PROMPT_VERSION = "cv-extraction.v2-packets-soft.v11-courses"
+CV_EXTRACTION_PROMPT_VERSION = "cv-extraction.v2-packets-soft.v12-projects"
 OFFER_EXTRACTION_PROMPT_VERSION = "offer-extraction.v2"
 PROFILE_NORMALIZATION_PROMPT_VERSION = "profile-normalization.v2"
 
@@ -421,6 +421,7 @@ def _translatable_profile_fields(profile: dict[str, Any]) -> dict[str, str]:
     groups = {
         "skills": ("name", "evidence"),
         "work_experience": ("job_title", "highlights"),
+        "projects": ("highlights",),
         "education": ("field",),
         "languages": ("name",),
     }

@@ -16,7 +16,7 @@ class GeminiCVSchemaTests(unittest.TestCase):
         flattened = flatten_cv_schema(original)
         self.assertEqual(original, before)
         self.assertEqual(flattened["type"], "object")
-        self.assertEqual(set(flattened["properties"]), {"h", "s", "sk", "x", "ed", "l", "p", "c"})
+        self.assertEqual(set(flattened["properties"]), {"h", "s", "sk", "x", "pr", "ed", "l", "p", "c"})
         self.assertEqual(flattened["properties"]["h"], {"type": ["string", "null"]})
         skill = flattened["properties"]["sk"]["items"]
         self.assertEqual(skill["properties"]["l"]["enum"],
@@ -59,7 +59,9 @@ class GeminiCVSchemaTests(unittest.TestCase):
         self.assertNotIn("y", skill["required"])
         self.assertNotIn("ci", skill["required"])
         self.assertIn("unknown", skill["properties"]["l"]["enum"])
-        self.assertEqual(cv_response_schema(json.dumps(plan)), flatten_cv_schema(plan["plan_schema"]))
+        expected_plan = flatten_cv_schema(plan["plan_schema"])
+        expected_plan["required"].append("pr")
+        self.assertEqual(cv_response_schema(json.dumps(plan)), expected_plan)
         unrelated = [
             "plain prompt", "[]", "null", "42",
             json.dumps({"candidate_profile": {}, "job_offer": {}, "requirements": []}),

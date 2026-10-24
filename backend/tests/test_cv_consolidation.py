@@ -12,6 +12,7 @@ from app.services.cv_consolidation import (
 )
 from app.services.cv_packets import make_packet_identity, process_packetized_cv_text
 from app.services.cv_pipeline import CV_EXTRACTION_PROMPT_VERSION
+from app.services.cv_compact_contract import validate_fragment, validate_expanded_profile
 
 
 def plan(**overrides):
@@ -21,6 +22,60 @@ def plan(**overrides):
 
 
 class CvConsolidationTests(unittest.TestCase):
+    def test_projects_are_kept_separate_from_employment_and_require_source_quotes(self):
+        source = "Proyecto Sistema de turnos. Implementé reservas con Python."
+        fragment, compact = validate_fragment({"pr": [{"n": "Sistema de turnos",
+            "h": ["Implementó reservas con Python"],
+            "q": ["Proyecto Sistema de turnos."]}]}, source)
+        self.assertEqual(len(fragment["projects"]), 1)
+        self.assertEqual(compact["pr"][0]["n"], "Sistema de turnos")
+        result = validate_and_build_profile(plan(pr=[["pr0"]]), [compact], 42)
+        validated = validate_expanded_profile(result, source, 42)
+        self.assertEqual(validated["projects"][0]["name"], "Sistema de turnos")
+        self.assertEqual(validated["work_experience"], [])
+        with self.assertRaises(ValueError):
+            validate_fragment({"pr": [{"n": "Sistema de turnos", "q": ["Cita inventada"]}]}, source)
+
+    def test_project_use_calibrates_only_the_named_technical_skill(self):
+        source = ("Proyecto Agenda. Tecnologías utilizadas: SQL. "
+                  "Proyecto A. Implementé reportes con Python. "
+                  "Proyecto B. Implementé reservas con Python. Habilidades: SQL, Python, Excel.")
+        profile = {
+            "schema_version": "candidate-profile.v2", "profile_id": "42",
+            "skills": [
+                {"name": name, "kind": "technical", "level": "unknown", "origin": "declared",
+                 "evidence": [f"Declara {name}"], "source_quotes": ["Habilidades: SQL, Python, Excel."]}
+                for name in ("SQL", "Python", "Excel")
+            ],
+            "projects": [
+                {"name": "Agenda", "source_quotes": ["Proyecto Agenda.", "Tecnologías utilizadas: SQL."]},
+                {"name": "Proyecto A", "source_quotes": ["Proyecto A.", "Implementé reportes con Python."]},
+                {"name": "Proyecto B", "source_quotes": ["Proyecto B.", "Implementé reservas con Python."]},
+            ],
+        }
+
+        result = validate_expanded_profile(profile, source, 42)
+
+        levels = {row["name"]: row["level"] for row in result["skills"]}
+        self.assertEqual(levels, {"SQL": "beginner", "Python": "intermediate", "Excel": "unknown"})
+        self.assertIn("Tecnologías utilizadas: SQL.", result["skills"][0]["source_quotes"])
+
+    def test_project_tool_list_restores_omitted_skill_without_duplication(self):
+        source = "Habilidades: Python. Proyecto Portal. Tecnologías utilizadas: Phyton, Tailwind."
+        profile = {
+            "schema_version": "candidate-profile.v2", "profile_id": "42",
+            "skills": [{"name": "Python", "kind": "technical", "level": "unknown",
+                        "origin": "declared", "evidence": ["Declara Python"],
+                        "source_quotes": ["Habilidades: Python."]}],
+            "projects": [{"name": "Portal", "source_quotes": ["Proyecto Portal.",
+                           "Tecnologías utilizadas: Phyton, Tailwind."]}],
+        }
+
+        result = validate_expanded_profile(profile, source, 42)
+
+        self.assertEqual([item["name"] for item in result["skills"]], ["Python", "Tailwind"])
+        self.assertTrue(all(item["level"] == "beginner" for item in result["skills"]))
+
     def test_broad_sales_name_merges_into_specific_name_with_same_concept(self):
         fragments = [{'sk': [
             {'n': 'Gestión de ventas', 'k': 'technical', 'ci': 'sales.sales',
@@ -151,7 +206,7 @@ class CvEffectivePacketPlanTests(unittest.IsolatedAsyncioTestCase):
             provider_calls.append(marker)
             if marker.endswith("consolidation-plan"):
                 return {"h": None, "s": None, "sk": [["sk0", "sk1"]], "x": [], "ed": [], "l": [["l0", "l1"]], "c": []}
-            return {"sk": [
+            return {"s": "Programación con Python y SQL.", "sk": [
                 {"n": "Python", "k": "technical", "o": "declared", "e": ["Conoce Python"], "q": ["Python"], "ci": "python"},
                 {"n": "SQL", "k": "technical", "o": "declared", "e": ["Conoce SQL"], "q": ["SQL"], "ci": "sql"},
             ], "l": [{"n": "Inglés", "l": "basic"}, {"n": "Inglés"}]}
@@ -165,6 +220,7 @@ class CvEffectivePacketPlanTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved["schema_version"], "cv-packets.v2")
             self.assertEqual(saved["consolidation"]["plan"]["sk"], [["sk0"], ["sk1"]])
             self.assertEqual([skill["name"] for skill in profile["skills"]], ["Python", "SQL"])
+            self.assertEqual(profile["summary"], "Programación con Python y SQL.")
 
             async def forbidden_provider(*_args, **_kwargs):
                 raise AssertionError("La caché completa debe validarse localmente, sin llamar al proveedor.")

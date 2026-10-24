@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import html
 import re
+import unicodedata
+from difflib import SequenceMatcher
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -36,7 +38,7 @@ def _decode_generated_text(value, *, key: str = ''):
         return {name: _decode_generated_text(item, key=name) for name, item in value.items()}
     return value
 _SAFE_SCHEMA_PATH_PARTS = {
-    "v", "id", "h", "s", "sk", "x", "ed", "l", "p", "c",
+    "v", "id", "h", "s", "sk", "x", "pr", "ed", "l", "p", "c",
     "n", "k", "o", "y", "e", "q", "ci", "t", "m", "f", "i", "d", "w", "st",
 }
 
@@ -73,6 +75,17 @@ class WireExperience(_WireModel):
     organization: str | None = Field(default=None, max_length=160, alias="o")
     duration_months: int | None = Field(default=None, ge=0, le=960, alias="m")
     highlights: list[str] = Field(default_factory=list, max_length=8, alias="h")
+
+
+class WireProject(_WireModel):
+    name: str = Field(min_length=1, max_length=160, alias="n")
+    highlights: list[str] = Field(default_factory=list, max_length=8, alias="h")
+    source_quotes: list[str] = Field(default_factory=list, max_length=8, alias="q")
+
+    @field_validator("source_quotes", mode="before")
+    @classmethod
+    def accept_one_quote(cls, value):
+        return [value] if isinstance(value, str) else value
 
 
 class WireEducation(_WireModel):
@@ -114,6 +127,7 @@ class _WireProfileFields(_WireModel):
     summary: str | None = Field(default=None, max_length=2000, alias="s")
     skills: list[WireSkill] = Field(default_factory=list, max_length=100, alias="sk")
     work_experience: list[WireExperience] = Field(default_factory=list, max_length=50, alias="x")
+    projects: list[WireProject] = Field(default_factory=list, max_length=30, alias="pr")
     education: list[WireEducation] = Field(default_factory=list, max_length=20, alias="ed")
     languages: list[WireLanguage] = Field(default_factory=list, max_length=20, alias="l")
     preferences: WirePreferences = Field(default_factory=WirePreferences, alias="p")
@@ -162,7 +176,7 @@ def validate_fragment(raw: dict, source_block: str) -> tuple[dict, dict]:
     expanded['skills'] = normalize_expanded_skills(expanded['skills'], source_text=source_block)
     expanded['education'] = ground_education(expanded['education'], source_block)
     expanded = safe_academic_narrative(expanded)
-    for field_name, model in (('skills', WireSkill), ('education', WireEducation)):
+    for field_name, model in (('skills', WireSkill), ('education', WireEducation), ('projects', WireProject)):
         setattr(fragment, field_name, [model.model_validate({
             field.alias or name: row[name] for name, field in model.model_fields.items() if name in row
         }) for row in expanded[field_name]])
@@ -184,7 +198,7 @@ def salvage_fragment(raw: dict, source_block: str) -> tuple[dict, dict, dict[str
         raise ValueError("El proveedor devolvió un fragmento compacto de CV inválido.") from None
     data = wire.model_dump(mode="python", by_alias=True)
     dropped: dict[str, int] = {}
-    for key in ("sk", "ed", "c"):
+    for key in ("sk", "ed", "c", "pr"):
         retained = []
         dropped[key] = 0
         for row in data[key]:
@@ -217,7 +231,7 @@ def salvage_fragment(raw: dict, source_block: str) -> tuple[dict, dict, dict[str
             highlights.append(highlight)
         experience["h"] = highlights
     expanded, compact = validate_fragment(data, source_block)
-    if not any(compact.get(key) for key in ("sk", "x", "ed", "l", "c")):
+    if not any(compact.get(key) for key in ("sk", "x", "pr", "ed", "l", "c")):
         raise ValueError("El proveedor no devolvió hechos verificables del CV.")
     return expanded, compact, dropped
 
@@ -251,6 +265,11 @@ def validate_expanded_profile(profile: dict, source_text: str, candidate_id: int
         'skills': normalize_expanded_skills(_decode_generated_text(profile.get('skills', [])), source_text=source_text),
         'education': ground_education(retain_explicit_courses(profile.get('education', []), source_text), source_text),
     })
+    profile['skills'] = normalize_expanded_skills(
+        _restore_project_list_skills(profile.get('skills', []), profile.get('projects', [])),
+        source_text=source_text,
+    )
+    profile['skills'] = _calibrate_project_skill_levels(profile['skills'], profile.get('projects', []))
     try:
         validated = CandidateProfile.model_validate(profile)
     except ValidationError as exc:
@@ -260,6 +279,97 @@ def validate_expanded_profile(profile: dict, source_text: str, candidate_id: int
     expanded = validated.model_dump(mode="json")
     _validate_profile_evidence(expanded, source_text)
     return expanded
+
+
+def _restore_project_list_skills(skills: list[dict], projects: list[dict]) -> list[dict]:
+    """Preserve explicit tools in project lists when the model omits a row."""
+    result = list(skills)
+    existing = {str(item.get('name') or '').strip().casefold() for item in result}
+    list_label = re.compile(
+        r'\b(?:tecnolog[ií]as?|herramientas?|software|stack)\s*'
+        r'(?:utilizad[ao]s?|emplead[ao]s?)?\s*:\s*([^\n;]+)', re.I,
+    )
+    generic = {'framework', 'otros', 'otras', 'herramientas', 'tecnologias', 'software'}
+    for project in projects:
+        for quote in project.get('source_quotes', []):
+            match = list_label.search(quote)
+            if not match:
+                continue
+            for part in re.split(r'\s*,\s*|\s+&\s+|\s+y\s+', match.group(1), flags=re.I):
+                name = re.sub(r'^framework\s+', '', part.strip(' .:;!'), flags=re.I).strip()
+                typo_of_existing = any(
+                    len(name) >= 5 and len(name) == len(known) and name[0].casefold() == known[0]
+                    and sorted(name.casefold()) == sorted(known)
+                    and SequenceMatcher(None, name.casefold(), known).ratio() >= 0.8
+                    for known in existing if known
+                )
+                if (not name or len(name) > 80 or name.casefold() in generic
+                        or name.casefold() in existing or typo_of_existing or len(result) >= 100):
+                    continue
+                result.append({
+                    'name': name, 'kind': 'technical', 'level': 'unknown',
+                    'origin': 'declared', 'years_experience': None,
+                    'evidence': [f"Herramienta mencionada en el proyecto {project['name']}."[:160]],
+                    'source_quotes': [quote], 'concept_id': None,
+                })
+                existing.add(name.casefold())
+    return result
+
+
+def _calibrate_project_skill_levels(skills: list[dict], projects: list[dict]) -> list[dict]:
+    """Credit documented project practice without guessing proficiency from a tool list alone."""
+    def fold(value: str) -> str:
+        value = unicodedata.normalize('NFKD', value)
+        return ''.join(char for char in value if not unicodedata.combining(char)).casefold()
+
+    use_signal = re.compile(r'\b(?:tecnologias?|herramientas?)\s+utilizad|\b(?:use|utilice|implemente|desarrolle|construi|programe|built|used|implemented|developed)\b')
+    ownership_signal = re.compile(r'\b(?:implemente|desarrolle|construi|programe|cree|built|implemented|developed)\b')
+    calibrated = []
+    for original in skills:
+        skill = dict(original)
+        if skill.get('kind') != 'technical' or skill.get('level') != 'unknown':
+            calibrated.append(skill)
+            continue
+        name = fold(str(skill.get('name') or '').strip())
+        if not name:
+            calibrated.append(skill)
+            continue
+        pattern = re.compile(r'(?<!\w)' + re.escape(name) + r'(?!\w)')
+
+        def mentioned(quote: str) -> bool:
+            if pattern.search(quote):
+                return True
+            if len(name) < 5 or not name.isalnum():
+                return False
+            return any(
+                len(token) == len(name) and token[:1] == name[:1]
+                and sorted(token) == sorted(name)
+                and SequenceMatcher(None, token, name).ratio() >= 0.8
+                for token in re.findall(r'\b\w+\b', quote)
+            )
+
+        matches = []
+        for project in projects:
+            for quote in project.get('source_quotes', []):
+                folded_quote = fold(quote)
+                if mentioned(folded_quote) and use_signal.search(folded_quote):
+                    matches.append((project, quote, bool(ownership_signal.search(folded_quote))))
+                    break
+        if matches:
+            evidence = list(skill.get('evidence') or [])
+            quotes = list(skill.get('source_quotes') or [])
+            project, quote, _owned = matches[0]
+            added = f"Práctica documentada en el proyecto {project['name']}."
+            if (len(evidence) < 8 and (quote in quotes or len(quotes) < 8) and len(added) <= 160):
+                if quote not in quotes:
+                    quotes.append(quote)
+                evidence.append(added)
+                skill['evidence'] = evidence
+                skill['source_quotes'] = quotes
+                skill['level'] = ('intermediate' if len({p['name'] for p, _q, owned in matches if owned}) >= 2
+                                  else 'beginner')
+        calibrated.append(skill)
+    return calibrated
 
 
 def _validate_profile_evidence(profile: dict, source_text: str) -> None:
@@ -287,6 +397,15 @@ def _validate_profile_evidence(profile: dict, source_text: str) -> None:
     for experience in profile.get("work_experience", []):
         if any(not highlight.strip() or len(highlight) > 160 for highlight in experience.get("highlights", [])):
             raise ValueError("Los aspectos destacados deben ser breves y no vacíos.")
+    for project in profile.get("projects", []):
+        quotes = project.get("source_quotes", [])
+        if " ".join(project.get("name", "").split()).casefold() not in source:
+            raise ValueError("El nombre del proyecto no aparece en el CV original.")
+        if not quotes or any(not quote.strip() or len(quote) > 160 or
+                             " ".join(quote.split()).casefold() not in source for quote in quotes):
+            raise ValueError("Cada proyecto debe tener citas literales del CV.")
+        if any(not highlight.strip() or len(highlight) > 160 for highlight in project.get("highlights", [])):
+            raise ValueError("Los aspectos destacados de un proyecto deben ser breves y no vacíos.")
 
 
 def fragment_schema() -> dict:
@@ -323,6 +442,9 @@ def contract_profile_to_wire(profile: dict) -> dict:
             }),
             "x": aliases(expanded.get("work_experience", []), {
                 "job_title": "t", "organization": "o", "duration_months": "m", "highlights": "h",
+            }),
+            "pr": aliases(expanded.get("projects", []), {
+                "name": "n", "highlights": "h", "source_quotes": "q",
             }),
             "ed": aliases(expanded.get("education", []), {
                 "level": "l", "field": "f", "institution": "i", "completed": "c",

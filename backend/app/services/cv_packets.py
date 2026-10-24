@@ -65,7 +65,7 @@ def _quote_catalog(text: str) -> dict[str, str]:
 
 def _resolve_quote_ids(raw: dict, catalog: dict[str, str]) -> dict:
     value = copy.deepcopy(raw)
-    for section in ("sk", "c", "ed"):
+    for section in ("sk", "c", "ed", "pr"):
         entries = value.get(section, [])
         if not isinstance(entries, list):
             continue
@@ -356,6 +356,8 @@ def validate_manifest(
             rebuilt, effective_plan = validate_and_build_profile_with_effective_plan(
                 consolidation["plan"], fragments, int(expected_identity["candidate_id"]),
             )
+            if not rebuilt.get("summary"):
+                rebuilt["summary"] = _fragment_summary(fragments)
             rebuilt = validate_expanded_profile(rebuilt, text, int(expected_identity["candidate_id"]))
             expanded = validate_expanded_profile(
                 consolidation["result"], text, int(expected_identity["candidate_id"]),
@@ -408,7 +410,7 @@ def _single_fragment_plan(fragments: list[dict[str, Any]], facts: dict[str, list
         return None if value in {"", "unknown"} else value
 
     identity_fields = {
-        "x": ("t", "o"), "ed": ("l", "f", "i"),
+        "x": ("t", "o"), "pr": ("n",), "ed": ("l", "f", "i"),
         "l": ("n",), "c": ("n", "i", "d", "x"),
     }
     for alias, rows in facts.items():
@@ -433,6 +435,22 @@ def _single_fragment_plan(fragments: list[dict[str, Any]], facts: dict[str, list
         "h": fragments[0].get("h"), "s": fragments[0].get("s"),
         **{alias: [[row["id"]] for row in rows] for alias, rows in facts.items()},
     }
+
+
+def _fragment_summary(fragments: list[dict[str, Any]]) -> str | None:
+    """Keep grounded packet summaries if the optional merge summary is blank."""
+    summaries = list(dict.fromkeys(
+        value.strip() for fragment in fragments
+        if isinstance(value := fragment.get("s"), str) and value.strip()
+    ))
+    selected: list[str] = []
+    total = 0
+    for summary in summaries:
+        if total + len(summary) + bool(selected) > 500:
+            break
+        selected.append(summary)
+        total += len(summary) + bool(len(selected) > 1)
+    return " ".join(selected) or None
 
 
 async def process_packetized_cv_text(
@@ -580,6 +598,8 @@ async def process_packetized_cv_text(
     else:
         logger.info("CV consolidation completed locally packets=1")
     profile, effective_plan = validate_and_build_profile_with_effective_plan(plan_raw, fragments, candidate_id)
+    if not profile.get("summary"):
+        profile["summary"] = _fragment_summary(fragments)
     profile = validate_expanded_profile(profile, text, candidate_id)
     manifest["consolidation"] = {
         "status": "completed",

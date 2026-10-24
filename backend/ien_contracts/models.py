@@ -99,6 +99,12 @@ class Experience(StrictModel):
     highlights: list[str] = Field(default_factory=list, max_length=8)
 
 
+class Project(StrictModel):
+    name: str = Field(min_length=1, max_length=160)
+    highlights: list[str] = Field(default_factory=list, max_length=8)
+    source_quotes: list[str] = Field(default_factory=list, max_length=8)
+
+
 class Education(StrictModel):
     level: Literal["secondary", "technical", "bachelor", "master", "doctorate", "other", "unknown"]
     field: str | None = Field(default=None, max_length=160)
@@ -155,6 +161,7 @@ class CandidateProfile(StrictModel):
     summary: str | None = Field(default=None, max_length=2000)
     skills: list[Skill] = Field(default_factory=list, max_length=100)
     work_experience: list[Experience] = Field(default_factory=list, max_length=50)
+    projects: list[Project] = Field(default_factory=list, max_length=30)
     education: list[Education] = Field(default_factory=list, max_length=20)
     languages: list[Language] = Field(default_factory=list, max_length=20)
     preferences: CandidatePreferences = Field(default_factory=CandidatePreferences)
@@ -170,6 +177,8 @@ class CandidateProfile(StrictModel):
                 raise ValueError("Cada habilidad declarada por el usuario debe conservar su evidencia de declaración.")
             if any(credential.origin == "declared" and (not credential.evidence or not credential.source_quotes) for credential in self.credentials):
                 raise ValueError("Cada credencial declarada de un perfil v2 debe incluir evidencia y citas del CV original.")
+            if any(not project.source_quotes for project in self.projects):
+                raise ValueError("Cada proyecto de un perfil v2 debe incluir citas del CV original.")
         return self
 
 

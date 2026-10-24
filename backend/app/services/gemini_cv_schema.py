@@ -104,8 +104,12 @@ def cv_response_schema(user_payload: str) -> dict[str, Any] | None:
                 raise KeyError
         except (KeyError, TypeError):
             raise ValueError("El esquema estructurado del CV no tiene una forma compatible.") from None
-        result["required"] = list(dict.fromkeys([*result.get("required", []), "sk"]))
+        result["required"] = list(dict.fromkeys([*result.get("required", []), "sk", "pr"]))
         skill["required"] = list(dict.fromkeys([*skill.get("required", []), *required_skill]))
         education = result['properties']['ed']['items']
         education['required'] = list(dict.fromkeys([*education.get('required', []), 'q']))
+        project = result['properties']['pr']['items']
+        project['required'] = list(dict.fromkeys([*project.get('required', []), 'n', 'q']))
+    else:
+        result['required'] = list(dict.fromkeys([*result.get('required', []), 'pr']))
     return result

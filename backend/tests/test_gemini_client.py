@@ -87,7 +87,7 @@ class GeminiClientTests(unittest.TestCase):
             ({'packet_id': 'synthetic-packet', 'text': 'CV ficticio.',
               'source_quotes': {'quote_0': 'CV ficticio.'}, 'fragment_schema': packet_schema}, packet_schema),
             ({'candidate_id': '42', 'candidate_profile_version': 'candidate-profile.v2',
-              'facts': {'sk': [], 'x': [], 'ed': [], 'l': [], 'c': []}, 'plan_schema': plan_schema}, plan_schema),
+              'facts': {'sk': [], 'x': [], 'pr': [], 'ed': [], 'l': [], 'c': []}, 'plan_schema': plan_schema}, plan_schema),
             ({'job_offer': {'requirements': []}, 'candidate_profile': {'skills': []}}, None),
         ]
         for payload, expected in cases:
@@ -107,6 +107,10 @@ class GeminiClientTests(unittest.TestCase):
                         expected_shape['required'] = ['sk']
                         expected_shape['properties']['sk']['items']['required'] = ['n', 'k', 'l', 'o', 'e', 'q']
                         expected_shape['properties']['ed']['items']['required'] = ['l', 'q']
+                        expected_shape['properties']['pr']['items']['required'] = ['n', 'q']
+                        expected_shape['required'].append('pr')
+                    elif 'plan_schema' in payload:
+                        expected_shape['required'].append('pr')
                     self.assertEqual(config['responseJsonSchema'], expected_shape)
                 self.assertNotIn('responseSchema', config)
         self.assertEqual(self.post.call_count, 3)  # One request per admission; no hidden retry.

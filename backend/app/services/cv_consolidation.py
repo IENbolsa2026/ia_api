@@ -19,6 +19,7 @@ class ConsolidationPlan(_PlanModel):
     summary: str | None = Field(default=None, max_length=500, alias="s")
     skills: list[list[str]] = Field(alias="sk", min_length=0, max_length=100)
     work_experience: list[list[str]] = Field(alias="x", min_length=0, max_length=50)
+    projects: list[list[str]] = Field(default_factory=list, alias="pr", max_length=30)
     education: list[list[str]] = Field(alias="ed", min_length=0, max_length=20)
     languages: list[list[str]] = Field(alias="l", min_length=0, max_length=20)
     credentials: list[list[str]] = Field(alias="c", min_length=0, max_length=50)
@@ -27,6 +28,7 @@ class ConsolidationPlan(_PlanModel):
 SECTIONS = {
     "sk": ("skills", ("n", "k", "l", "o", "y", "ci")),
     "x": ("work_experience", ("t", "o", "m")),
+    "pr": ("projects", ("n",)),
     "ed": ("education", ("l", "f", "i", "c", "st", "q")),
     "l": ("languages", ("n", "l")),
     "c": ("credentials", ("n", "i", "d", "x", "o")),
@@ -78,6 +80,7 @@ def validate_and_build_profile_with_effective_plan(
         "summary": plan.summary,
         "skills": _merge_groups(effective_plan_model.skills, facts["skills"], "skills"),
         "work_experience": _merge_groups(effective_plan_model.work_experience, facts["work_experience"], "work_experience"),
+        "projects": _merge_groups(effective_plan_model.projects, facts["projects"], "projects"),
         "education": _merge_groups(effective_plan_model.education, facts["education"], "education"),
         "languages": _merge_groups(effective_plan_model.languages, facts["languages"], "languages"),
         "credentials": _merge_groups(effective_plan_model.credentials, facts["credentials"], "credentials"),
@@ -116,7 +119,7 @@ def compact_facts_for_plan(fragments: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _collect_facts(fragments: list[dict[str, Any]]) -> tuple[dict[str, dict[str, dict]], dict[str, list]]:
     facts: dict[str, dict[str, dict]] = {
-        "skills": {}, "work_experience": {}, "education": {}, "languages": {}, "credentials": {},
+        "skills": {}, "work_experience": {}, "projects": {}, "education": {}, "languages": {}, "credentials": {},
     }
     preferences: dict[str, list] = {"locations": [], "work_modes": []}
     counters = {alias: 0 for alias in SECTIONS}
@@ -175,6 +178,8 @@ def _merge_one(rows: list[dict], section: str) -> dict:
         return _merge_skill(rows)
     if section == "work_experience":
         return _merge_experience(rows)
+    if section == "projects":
+        return _merge_project(rows)
     if section == "education":
         return _merge_education(rows)
     if section == "languages":
@@ -232,6 +237,16 @@ def _merge_experience(rows: list[dict]) -> dict:
         "organization": _one_known(rows, "o", {None}),
         "duration_months": _one_known(rows, "m", {None}),
         "highlights": _union_text_field(rows, "h"),
+    }
+
+
+def _merge_project(rows: list[dict]) -> dict:
+    if len({_normalize(row.get("n")) for row in rows}) > 1:
+        raise IncompatibleFactGroup("El plan agrupó proyectos con nombres distintos.")
+    return {
+        "name": rows[0]["n"],
+        "highlights": _union_text_field(rows, "h"),
+        "source_quotes": _union_text_field(rows, "q"),
     }
 
 

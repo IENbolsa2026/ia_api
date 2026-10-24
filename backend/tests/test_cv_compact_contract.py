@@ -37,7 +37,7 @@ class CompactCvContractTests(unittest.TestCase):
         self.assertEqual(expanded["education"][0]["completion_status"], "in_progress")
         self.assertEqual(expanded["credentials"], [])
         self.assertLessEqual(len(compact["x"][0]["h"][0]), 160)
-        self.assertEqual(dropped, {"sk": 1, "ed": 0, "c": 1})
+        self.assertEqual(dropped, {"sk": 1, "ed": 0, "c": 1, "pr": 0})
 
     def test_salvage_rejects_a_fragment_with_no_grounded_facts(self):
         with self.assertRaisesRegex(ValueError, "hechos verificables"):
@@ -64,6 +64,7 @@ class CompactCvContractTests(unittest.TestCase):
                 "job_title": "Chofer", "organization": "Ruta Sur", "duration_months": 48,
                 "highlights": ["Traslado de cargas en rutas nacionales."],
             }],
+            "projects": [],
             "education": [{"level": "technical", "field": "Logística", "institution": "Instituto Técnico", "completed": True,
                            "completion_status": "unknown", "source_quotes": []}],
             "languages": [{"name": "Inglés", "level": "conversational"}],

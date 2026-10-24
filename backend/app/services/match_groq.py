@@ -188,6 +188,7 @@ class GroqClient:
             'Compará primero concept_id y nombres canónicos; aceptá sinónimos o equivalencias solo si la evidencia '
             'describe la misma capacidad concreta. Una herramienta general no demuestra dominio de una específica. '
             'Un curso por sí solo demuestra formación, no práctica ni nivel de una habilidad técnica. '
+            'Un proyecto con tarea o tecnología atribuida puede demostrar práctica; no lo presentes como empleo formal. '
             'Si la única mención de una herramienta o habilidad técnica está en education, marcá unknown, nunca partial. '
             'Si el requisito no pide un nivel mínimo y una skill declarada equivalente tiene evidencia, marcá met '
             'aunque el nivel de esa skill sea unknown; unknown describe el nivel, no la existencia de la habilidad. '

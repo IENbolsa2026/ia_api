@@ -254,15 +254,17 @@ class ProfileAndOfferPipelineAcceptanceTests(unittest.IsolatedAsyncioTestCase):
                          [("a", True, "technical_skills", "required_text"), ("b", False, "desirables", "required_text")])
 
     async def test_normalization_changes_only_translatable_text(self):
-        original = profile(headline="Logistics operator", skills=[{"name": "Forklift", "level": "advanced", "years_experience": 4, "evidence": ["Operated a forklift"], "source_quotes": ["Operated a forklift"], "kind": "technical", "origin": "declared"}], credentials=[{"name": "License X", "issued_at": "2022", "origin": "declared", "evidence": ["License X"], "source_quotes": ["License X"]}], rejected_skills=[{"name": "Hacking", "reason": "No se menciona en el CV"}])
+        original = profile(headline="Logistics operator", skills=[{"name": "Forklift", "level": "advanced", "years_experience": 4, "evidence": ["Operated a forklift"], "source_quotes": ["Operated a forklift"], "kind": "technical", "origin": "declared"}], projects=[{"name": "Warehouse pilot", "highlights": ["Built an inventory tool"], "source_quotes": ["Warehouse pilot"]}], credentials=[{"name": "License X", "issued_at": "2022", "origin": "declared", "evidence": ["License X"], "source_quotes": ["License X"]}], rejected_skills=[{"name": "Hacking", "reason": "No se menciona en el CV"}])
         normalized_original = CandidateProfile.model_validate(original).model_dump(mode="json")
         translations = cv_pipeline._translatable_profile_fields(normalized_original)
-        translations.update({"/headline": "Operador logístico", "/skills/0/name": "Autoelevador"})
+        translations.update({"/headline": "Operador logístico", "/skills/0/name": "Autoelevador", "/projects/0/highlights/0": "Creó una herramienta de inventario"})
         async def fake_call(*_args): return {"translations": translations}
         with patch.object(cv_pipeline, "_call_async", side_effect=fake_call):
             result = await cv_pipeline.normalize_candidate_profile(original, 42)
         self.assertEqual(result["headline"], "Operador logístico")
         self.assertEqual(result["skills"][0]["name"], "Autoelevador")
+        self.assertEqual(result["projects"][0]["highlights"], ["Creó una herramienta de inventario"])
+        self.assertEqual(result["projects"][0]["source_quotes"], ["Warehouse pilot"])
         for key in ("level", "years_experience", "evidence", "source_quotes", "origin", "kind"):
             self.assertEqual(result["skills"][0][key], original["skills"][0][key])
         self.assertEqual(result["credentials"], normalized_original["credentials"])
