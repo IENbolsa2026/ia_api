@@ -11,7 +11,7 @@ cliente. El límite actual es 20 páginas PDF, 50 MiB descomprimidos para Office
 y 100.000 caracteres de texto. No se trunca contenido. El OCR queda fuera de
 alcance.
 
-El análisis del CV usa `cv-extraction.v2-packets-soft.v9-rag` y mantiene el perfil ampliado
+El análisis del CV usa `cv-extraction.v2-packets-soft.v13-education` y mantiene el perfil ampliado
 `candidate-profile.v2`. Divide el texto en paquetes de hasta
 `CV_PACKET_CHARACTERS` (500 por defecto, limitado por `CV_BLOQUE_CARACTERES`).
 Cada llamada utiliza `CV_EXTRACTION_MAX_TOKENS` (950 por defecto). Si una salida
@@ -440,7 +440,7 @@ El puerto 8002 y el paquete `jev_match_api` ya no forman parte del arranque.
 
 ## Prompt y cálculo de compatibilidad v3
 
-- `app/prompts/cv_extraction.v2.blocks.compact.system.md` y `cv_consolidation.v2.refs.system.md` y `offer_extraction.v2.system.md`
+- `app/prompts/cv_extraction.v2.packets-soft.v8.system.md`, `cv_consolidation.v2.refs.system.md` y `offer_extraction.v2.system.md`
   estructuran CV y ofertas de cualquier rubro con textos visibles en español.
   Las habilidades conservan evidencia y citas del documento original.
 - `GroqClient.evaluate_v2` devuelve un juicio por identificador de requisito.

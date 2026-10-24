@@ -14,7 +14,7 @@ class CVArtifactError(RuntimeError):
 
 
 def scanner_available() -> bool:
-    return bool(settings.CV_SCAN_COMMAND and Path(settings.CV_SCAN_COMMAND).is_file())
+    return bool(settings.CV_SCAN_BACKEND in {"defender", "clamav"} and settings.CV_SCAN_COMMAND and Path(settings.CV_SCAN_COMMAND).is_file())
 
 
 def artifact_directory() -> Path:
@@ -41,9 +41,13 @@ def scan_artifact(path: Path) -> None:
     executable = Path(settings.CV_SCAN_COMMAND) if scanner_available() else None
     if executable is None:
         raise CVArtifactError("El escaneo de seguridad está habilitado, pero no hay un escáner disponible.")
+    arguments = (
+        [str(executable), "--no-summary", str(path)] if settings.CV_SCAN_BACKEND == "clamav"
+        else [str(executable), "-Scan", "-ScanType", "3", "-File", str(path), "-DisableRemediation"]
+    )
     try:
         result = subprocess.run(
-            [str(executable), "-Scan", "-ScanType", "3", "-File", str(path), "-DisableRemediation"],
+            arguments,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

@@ -68,6 +68,7 @@ class Settings(BaseSettings, extra="ignore"):
     CV_MAX_UPLOAD_BODY_OVERHEAD: int = 256 * 1024
     CV_ARTIFACT_DIR: str = "private_cv_artifacts"
     CV_SCAN_ENABLED: bool = False
+    CV_SCAN_BACKEND: str = "defender"
     CV_SCAN_TIMEOUT_SECONDS: int = 30
     CV_SCAN_COMMAND: str = ""
     CV_DOCKER_COMMAND: str = "docker"
