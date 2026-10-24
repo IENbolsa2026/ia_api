@@ -26,7 +26,7 @@ _ONGOING = re.compile(
 )
 _GRADUATED = re.compile(
     r'\b(?:graduad[oa]|recibid[oa]|titulad[oa]|egresad[oa]|graduated|'
-    r'finalizad[oa]|completad[oa]|concluid[oa]|completed|degree awarded|degree obtained|'
+    r'finalizad[oa]|completad[oa]|complet[oa]|concluid[oa]|completed|degree awarded|degree obtained|'
     r'titulo obtenido|se doctoro|obtuvo (?:el |su )?(?:titulo|doctorado))\b|'
     r'\b(?:doctor[ae]?|licenciad[oa]|ingenier[oa]|magister) en\b'
 )
@@ -81,6 +81,20 @@ def _study_context(row: dict, quotes: list[str]) -> list[str]:
     return contexts
 
 
+def _within_education_section(quote: str, source_text: str) -> bool:
+    first_line = quote.splitlines()[0].strip()
+    in_education = False
+    for line in source_text.splitlines():
+        normalized_line = _normalize(line.strip())
+        if _EDUCATION_HEADING.fullmatch(normalized_line):
+            in_education = True
+        elif _OTHER_HEADING.fullmatch(normalized_line):
+            in_education = False
+        elif in_education and first_line and first_line in line:
+            return True
+    return False
+
+
 def _completion_status(evidence: str) -> str:
     if _ONGOING.search(evidence) and not re.search(r'\b(?:abandonad\w*|suspendid\w*|unfinished)\b', evidence):
         return 'in_progress'
@@ -99,6 +113,11 @@ def ground_education(education: list[dict], source_text: str) -> list[dict]:
         quotes = row.get('source_quotes', [])
         if not quotes or any(not quote.strip() or len(quote) > 160 or ' '.join(quote.split()).casefold() not in source for quote in quotes):
             raise ValueError('Cada estudio requiere citas literales del programa y su estado en el CV.')
+        if (row.get('level') == 'technical' and row.get('field')
+                and not any(re.search(_LEVEL_ANCHORS['technical'], _normalize(quote)) for quote in quotes)
+                and any(_within_education_section(quote, source_text) for quote in quotes)):
+            # Professional training is not necessarily a formal Tecnicatura.
+            row['level'] = 'other'
         statuses = {_completion_status(context) for context in _study_context(row, quotes)}
         # Ambiguous/contradictory mentions cannot grant a degree.
         status = statuses.pop() if len(statuses) == 1 else 'unknown'
@@ -133,6 +152,99 @@ def retain_explicit_courses(education: list[dict], source_text: str) -> list[dic
         if len(rows) >= 20:
             break
         rows.append({'level': 'other', 'field': title, 'institution': None,
+                     'completed': None, 'completion_status': 'unknown', 'source_quotes': [quote]})
+    return rows
+
+
+_ACADEMIC_LINE = re.compile(
+    r'^(?:[•*\-]\s*)?(?P<program>'
+    r'(?P<level>doctorado|maestr[ií]a|licenciatura|ingenier[ií]a|'
+    r'tecnicatura|profesorado|secundari[oa]|bachillerato)'
+    r'(?:\s+(?:en|de|del)\s+[^,;:()]+?)?)'
+    r'(?=\s*(?:[,;:()]|\s*[-–]\s*|\s*$|\b(?:completad\w*|finalizad\w*|'
+    r'terminad\w*|cursando|en curso|incomplet\w*|graduad\w*|complet[oa])\b))', re.I,
+)
+_ACADEMIC_LEVELS = {
+    'doctorado': 'doctorate', 'maestria': 'master',
+    'licenciatura': 'bachelor', 'ingenieria': 'bachelor',
+    'tecnicatura': 'technical', 'profesorado': 'other',
+    'secundario': 'secondary', 'secundaria': 'secondary',
+    'bachillerato': 'secondary',
+}
+_EDUCATION_HEADING = re.compile(
+    r'^(?:educacion|formacion(?: academica| profesional)?|estudios)(?: y capacitacion)?\s*:?(?:\s*)$', re.I,
+)
+_OTHER_HEADING = re.compile(
+    r'^(?:experiencia(?: laboral| profesional)?|habilidades|competencias|proyectos|'
+    r'idiomas|perfil(?: profesional)?|datos personales|referencias|contacto|'
+    r'cursos|certificaciones|licencias|capacitaciones)\s*:?(?:\s*)$', re.I,
+)
+_NON_PROGRAM = re.compile(
+    r'^(?:curso|taller|seminario|universidad|instituto|escuela|colegio|facultad|'
+    r'finalizad\w*|completad\w*|en curso|actualidad|\d)', re.I,
+)
+
+
+def retain_explicit_academic_education(education: list[dict], source_text: str) -> list[dict]:
+    """Recover unmistakable degree lines omitted by the provider, with literal evidence.
+
+    This deliberately does not turn a university name, date or course into a
+    degree, and never assumes completion when the source omits its status.
+    """
+    rows = copy.deepcopy(education)
+    lines = [line.strip() for line in source_text.splitlines()]
+    in_education = False
+    skip_next = False
+    for index, line in enumerate(lines):
+        if skip_next:
+            skip_next = False
+            continue
+        normalized_line = _normalize(line)
+        if _EDUCATION_HEADING.fullmatch(normalized_line):
+            in_education = True
+            continue
+        if _OTHER_HEADING.fullmatch(normalized_line):
+            in_education = False
+            continue
+        continuation = None
+        if re.search(r'\b(?:en|de|del)\s*$', line, re.I) and index + 1 < len(lines):
+            following = lines[index + 1]
+            if following and len(line) + len(following) + 1 <= 160:
+                continuation = line + '\n' + following
+        match = _ACADEMIC_LINE.match(continuation or line)
+        previous_is_course = index > 0 and bool(re.match(r'^(?:curso|taller|seminario)\b', lines[index - 1], re.I))
+        if not match and not (in_education and not previous_is_course and 8 <= len(line) <= 100
+                              and 2 <= len(line.split()) <= 10
+                              and not _NON_PROGRAM.match(normalized_line)
+                              and not line.endswith(':')
+                              and not re.search(r'\b(?:@|https?://|www\.)', line, re.I)):
+            continue
+        quote = continuation if match and continuation else line
+        program = ' '.join(match.group('program').split()) if match else line.strip(' •*-–')
+        if match and continuation:
+            skip_next = True
+        if match and index + 1 + bool(continuation) < len(lines):
+            following = lines[index + 1 + bool(continuation)]
+            carries_status = re.match(r'^(?:en curso|cursando|cursad\w*|finalizad\w*|'
+                                      r'complet\w*|incomplet\w*|graduad\w*)\b', following, re.I)
+            if following and carries_status and not _ACADEMIC_LINE.match(following):
+                pair = quote + '\n' + following
+                if len(pair) <= 160:
+                    quote = pair
+                    if not continuation:
+                        skip_next = True
+        if len(quote) > 160:
+            continue
+        level = _ACADEMIC_LEVELS[_normalize(match.group('level'))] if match else 'other'
+        field = program[len(match.group('level')):].strip() if match and level != 'other' else program
+        field = re.sub(r'^(?:en|de|del)\s+', '', field, flags=re.I).strip() or None
+        if any((field and _tokens(field) <= _tokens(row.get('field') or ''))
+               or (not field and row.get('level') == level and not row.get('field'))
+               for row in rows):
+            continue
+        if len(rows) >= 20:
+            break
+        rows.append({'level': level, 'field': field, 'institution': None,
                      'completed': None, 'completion_status': 'unknown', 'source_quotes': [quote]})
     return rows
 

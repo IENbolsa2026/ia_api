@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from app.core.config import settings
 from app.services.cv_compact_contract import validate_fragment
 from app.services.cv_consolidation import validate_and_build_profile
-from app.services.cv_education_guard import ground_education, safe_academic_narrative
+from app.services.cv_education_guard import ground_education, retain_explicit_academic_education, safe_academic_narrative
 from app.services.cv_pipeline import process_cv_text
 
 
@@ -157,6 +157,56 @@ class ExplicitCourseTests(unittest.TestCase):
                          ['Curso de conceptos básicos de Microsoft Word y Excel', 'Curso de análisis de datos'])
         self.assertEqual([row['completion_status'] for row in result['education']], ['unknown', 'completed'])
         self.assertEqual(result['skills'], [])
+
+
+class ExplicitEducationRecoveryTests(unittest.TestCase):
+    def test_omitted_vocational_training_is_recovered_only_from_education_section(self):
+        source = ('FORMACIÓN ACADÉMICA\nPiloto comercial\nEscuela de aviación\n'
+                  'EXPERIENCIA LABORAL\nVendedor de mostrador')
+        rows = retain_explicit_academic_education([], source)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['field'], 'Piloto comercial')
+        self.assertEqual(rows[0]['level'], 'other')
+        self.assertIsNone(ground_education(rows, source)[0]['completed'])
+        self.assertEqual(retain_explicit_academic_education([], 'EXPERIENCIA LABORAL\nPiloto comercial'), [])
+
+    def test_technical_label_without_formal_degree_does_not_invent_tecnicatura(self):
+        source = 'EDUCACIÓN\nPiloto comercial\n'
+        row = ground_education([{'level': 'technical', 'field': 'Piloto comercial',
+                                 'source_quotes': ['Piloto comercial']}], source)[0]
+        self.assertEqual(row['level'], 'other')
+        self.assertIsNone(row['completed'])
+        expanded, _compact = validate_fragment({'ed': [{'l': 'technical', 'f': 'Piloto comercial',
+                                                        'q': ['Piloto comercial']}]}, source)
+        self.assertEqual(expanded['education'][0]['level'], 'other')
+
+    def test_formal_study_recovery_keeps_status_and_deduplicates_provider_fact(self):
+        source = 'ESTUDIOS\nSecundario completo\nLicenciatura en Historia, en curso\n'
+        rows = retain_explicit_academic_education([], source)
+        self.assertEqual([(row['level'], row['field']) for row in rows],
+                         [('secondary', None), ('bachelor', 'Historia')])
+        grounded = ground_education(rows, source)
+        self.assertEqual([row['completion_status'] for row in grounded], ['completed', 'in_progress'])
+        self.assertEqual(len(retain_explicit_academic_education(grounded, source)), 2)
+
+    def test_wrapped_program_name_is_one_study(self):
+        source = 'EDUCACIÓN\nLicenciatura en\nComunicación social\nen curso\n'
+        rows = retain_explicit_academic_education([], source)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['field'], 'Comunicación social')
+        self.assertEqual(ground_education(rows, source)[0]['completion_status'], 'in_progress')
+
+    def test_final_profile_restores_omitted_training(self):
+        from app.services.cv_compact_contract import validate_expanded_profile
+
+        source = 'FORMACIÓN PROFESIONAL\nPiloto comercial\nEXPERIENCIA LABORAL\nVendedor'
+        profile = {'schema_version': 'candidate-profile.v2', 'profile_id': '42',
+                   'headline': None, 'summary': None, 'skills': [], 'work_experience': [],
+                   'education': [], 'languages': [], 'preferences': {'locations': [], 'work_modes': []},
+                   'credentials': [], 'rejected_skills': []}
+        result = validate_expanded_profile(profile, source, 42)
+        self.assertEqual([(row['level'], row['field']) for row in result['education']],
+                         [('other', 'Piloto comercial')])
 
 
 class AcademicPipelineTests(unittest.IsolatedAsyncioTestCase):

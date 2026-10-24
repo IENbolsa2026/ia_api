@@ -18,7 +18,10 @@ from ien_contracts.models import (
     SkillOrigin,
     WorkMode,
 )
-from app.services.cv_education_guard import ground_education, retain_explicit_courses, safe_academic_narrative, validate_credential_completion
+from app.services.cv_education_guard import (
+    ground_education, retain_explicit_academic_education, retain_explicit_courses,
+    safe_academic_narrative, validate_credential_completion,
+)
 from app.services.cv_skill_taxonomy import normalize_expanded_skills
 
 
@@ -263,7 +266,10 @@ def validate_expanded_profile(profile: dict, source_text: str, candidate_id: int
     profile = safe_academic_narrative({
         **_decode_generated_text(profile),
         'skills': normalize_expanded_skills(_decode_generated_text(profile.get('skills', [])), source_text=source_text),
-        'education': ground_education(retain_explicit_courses(profile.get('education', []), source_text), source_text),
+        'education': ground_education(retain_explicit_courses(
+            retain_explicit_academic_education(profile.get('education', []), source_text),
+            source_text,
+        ), source_text),
     })
     profile['skills'] = normalize_expanded_skills(
         _restore_project_list_skills(profile.get('skills', []), profile.get('projects', [])),
