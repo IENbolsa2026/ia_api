@@ -13,6 +13,7 @@ from app.tasks.match_tasks import evaluate_match_task
 
 
 router = APIRouter()
+MATCH_WEBSOCKET_HEARTBEAT_SECONDS = 15
 
 
 def start(request: MatchRequest) -> dict:
@@ -60,6 +61,7 @@ async def match_socket(websocket: WebSocket) -> None:
     await websocket.accept()
     request_id: str | None = None
     last_status: str | None = None
+    last_message_at = asyncio.get_running_loop().time()
     try:
         while True:
             if request_id:
@@ -72,8 +74,14 @@ async def match_socket(websocket: WebSocket) -> None:
                     if job.get("error"):
                         message["error"] = job["error"]
                     await websocket.send_json(message)
+                    last_message_at = asyncio.get_running_loop().time()
                     if job["status"] in {"completed", "failed"}:
                         request_id = None
+                elif job and asyncio.get_running_loop().time() - last_message_at >= MATCH_WEBSOCKET_HEARTBEAT_SECONDS:
+                    # El dispatcher mantiene una conexión por trabajo; sin
+                    # actividad, su recv vence a los 60 s y posterga la entrega.
+                    await websocket.send_json({"type": "match.heartbeat", "request_id": request_id})
+                    last_message_at = asyncio.get_running_loop().time()
             try:
                 message = await asyncio.wait_for(websocket.receive_json(), timeout=0.5)
             except TimeoutError:

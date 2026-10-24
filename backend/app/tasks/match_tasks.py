@@ -60,7 +60,8 @@ def evaluate_match_task(self: Any, request_id: str) -> dict[str, Any]:
                 "job_offer": request["job_offer"],
                 "evaluation_date": request["metadata"]["evaluation_date"],
                 "candidate_evidence_index": candidate_evidence_index(request["candidate_profile"]),
-            })
+            }, completed_batches=job.get("batch_checkpoint"),
+                on_batch_completed=lambda batches: update_owned(batch_checkpoint=batches))
         else:
             response = GroqClient().evaluate(
                 {"candidate_profile": request["candidate_profile"], "job_offer": request["job_offer"]},

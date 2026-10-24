@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -12,6 +12,7 @@ from app.services.rate_limiter import RateLimitExceeded, estimate_request_tokens
 
 MATCH_RUBRIC_V2_VERSION = "match-rubric.v3-points"
 MATCHER_PROMPT_V2_VERSION = "match-groq.v3-evidence"
+MATCH_REQUIREMENTS_PER_BATCH = 5
 
 
 class Dimension(BaseModel):
@@ -147,24 +148,52 @@ class GroqClient:
             raise GroqError('El proveedor devolvió una evaluación inválida.') from exc
         return {'answers': evaluation.model_dump(), 'model': body.get('model', self._model()), 'usage': body.get('usage', {})}
 
-    def evaluate_v2(self, state: dict[str, Any]) -> dict[str, Any]:
+    def evaluate_v2(
+        self,
+        state: dict[str, Any],
+        *,
+        completed_batches: list[dict[str, Any]] | None = None,
+        on_batch_completed: Callable[[list[dict[str, Any]]], None] | None = None,
+    ) -> dict[str, Any]:
         """Pide un juicio auditable por ID; el código aplica todos los pesos y puntajes."""
         requirements = state.get('job_offer', {}).get('requirements', [])
-        if len(requirements) <= 4:
-            return self._evaluate_v2_batch(state)
-        assessments = []
+        batches = [requirements[start:start + MATCH_REQUIREMENTS_PER_BATCH]
+                   for start in range(0, len(requirements), MATCH_REQUIREMENTS_PER_BATCH)]
+        if not batches:
+            batches = [[]]
+        completed = list(completed_batches or [])
+        if len(completed) > len(batches):
+            raise ValueError('El progreso guardado del match no coincide con la oferta.')
+        for index, saved in enumerate(completed):
+            self._validate_batch(saved, batches[index])
+
+        assessments: list[dict[str, Any]] = []
         usage = {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
         model = None
-        for start in range(0, len(requirements), 4):
-            batch_state = {**state, 'job_offer': {
-                **state['job_offer'], 'requirements': requirements[start:start + 4],
-            }}
-            batch = self._evaluate_v2_batch(batch_state)
+        for index, subset in enumerate(batches):
+            if index < len(completed):
+                batch = completed[index]
+            else:
+                batch_state = {**state, 'job_offer': {
+                    **state['job_offer'], 'requirements': subset,
+                }}
+                batch = self._evaluate_v2_batch(batch_state)
+                self._validate_batch(batch, subset)
+                completed.append(batch)
+                if on_batch_completed is not None:
+                    on_batch_completed(list(completed))
             assessments.extend(batch['assessments'])
             model = batch['model']
             for key in usage:
                 usage[key] += batch['usage'].get(key, 0)
         return {'assessments': assessments, 'model': model, 'usage': usage}
+
+    @staticmethod
+    def _validate_batch(batch: dict[str, Any], requirements: list[dict[str, Any]]) -> None:
+        expected = [item['id'] for item in requirements]
+        actual = [item['requirement_id'] for item in batch['assessments']]
+        if len(actual) != len(set(actual)) or set(actual) != set(expected):
+            raise GroqError('El proveedor devolvió juicios que no coinciden con este lote de requisitos.')
 
     def _evaluate_v2_batch(self, state: dict[str, Any]) -> dict[str, Any]:
         self._require_key()

@@ -1,11 +1,14 @@
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 import httpx
 from app.core.config import settings
 from app.services.match_groq import GroqClient, GroqError
+from app.services.rate_limiter import RateLimitExceeded
+from app.tasks.match_tasks import evaluate_match_task
+from celery.exceptions import Retry
 
 
 class GroqClientTests(unittest.TestCase):
@@ -73,8 +76,90 @@ class GroqClientTests(unittest.TestCase):
             return httpx.Response(200, json={'choices': [{'message': {'content': json.dumps({'assessments': items})}}],
                                              'model': 'qwen/qwen3.8-27b', 'usage': {'total_tokens': 100}})
         post.side_effect = reply
-        requirements = [{'id': str(index)} for index in range(5)]
+        requirements = [{'id': str(index)} for index in range(6)]
         result = GroqClient().evaluate_v2({'job_offer': {'requirements': requirements}})
-        self.assertEqual([item['requirement_id'] for item in result['assessments']], [str(i) for i in range(5)])
+        self.assertEqual([item['requirement_id'] for item in result['assessments']], [str(i) for i in range(6)])
         self.assertEqual(post.call_count, 2)
         self.assertEqual(result['usage']['total_tokens'], 200)
+
+    @patch.object(settings, 'MATCH_PROVIDER', 'groq')
+    @patch.object(settings, 'GROQ_API_KEY', 'synthetic-key')
+    @patch('app.services.match_groq.httpx.post')
+    def test_quota_retry_resumes_after_saved_batch_without_repeating_it(self, post):
+        requirements = [{'id': str(index)} for index in range(6)]
+        state = {'job_offer': {'requirements': requirements}}
+        saved = []
+        sent_ids = []
+
+        def reply(_url, **kwargs):
+            request = json.loads(kwargs['json']['messages'][1]['content'])
+            ids = [item['id'] for item in request['job_offer']['requirements']]
+            sent_ids.append(ids)
+            answer = {'assessments': [
+                {'requirement_id': item_id, 'status': 'unknown', 'explanation': 'Sin evidencia.', 'evidence_refs': []}
+                for item_id in ids
+            ]}
+            return httpx.Response(200, json={
+                'choices': [{'message': {'content': json.dumps(answer)}}],
+                'model': 'synthetic-model', 'usage': {'total_tokens': 100},
+            })
+
+        post.side_effect = reply
+        self.limiter.reserve.side_effect = [None, RateLimitExceeded(12, reason='cooldown'), None]
+        with self.assertRaises(RateLimitExceeded):
+            GroqClient().evaluate_v2(state, on_batch_completed=lambda batches: saved.extend(batches))
+        self.assertEqual(len(saved), 1)
+        result = GroqClient().evaluate_v2(state, completed_batches=saved)
+        self.assertEqual(sent_ids, [['0', '1', '2', '3', '4'], ['5']])
+        self.assertEqual([item['requirement_id'] for item in result['assessments']], [str(i) for i in range(6)])
+        self.assertEqual(result['usage']['total_tokens'], 200)
+
+    def test_task_persists_completed_batch_across_quota_retry(self):
+        state = {
+            'status': 'accepted',
+            'request': {
+                'protocol_version': 'match.v2',
+                'candidate_profile': {},
+                'job_offer': {'requirements': [{'id': str(i)} for i in range(6)]},
+                'metadata': {'evaluation_date': '2026-10-24'},
+            },
+        }
+        saved_batch = {'assessments': [
+            {'requirement_id': str(i), 'status': 'unknown', 'explanation': 'Sin evidencia.', 'evidence_refs': []}
+            for i in range(5)
+        ], 'model': 'synthetic-model', 'usage': {'total_tokens': 100}}
+        store = MagicMock()
+        store.get.side_effect = lambda _request_id: state.copy()
+        store.acquire_lock.return_value = True
+        store.update_owned.side_effect = lambda _request_id, **changes: state.update(changes)
+
+        def first_evaluation(_payload, *, completed_batches, on_batch_completed):
+            self.assertIsNone(completed_batches)
+            on_batch_completed([saved_batch])
+            raise RateLimitExceeded(12, reason='cooldown')
+
+        with patch('app.tasks.match_tasks.MatchJobStore', return_value=store), \
+             patch('app.tasks.match_tasks.GroqClient') as provider, \
+             patch.object(evaluate_match_task, 'retry', side_effect=Retry('deferred')):
+            provider.return_value.evaluate_v2.side_effect = first_evaluation
+            evaluate_match_task.push_request(retries=0)
+            try:
+                with self.assertRaises(Retry):
+                    evaluate_match_task.run('synthetic-request')
+            finally:
+                evaluate_match_task.pop_request()
+
+        self.assertEqual(state['batch_checkpoint'], [saved_batch])
+        self.assertEqual(state['status'], 'rate_limited')
+
+        with patch('app.tasks.match_tasks.MatchJobStore', return_value=store), \
+             patch('app.tasks.match_tasks.GroqClient') as provider, \
+             patch('app.tasks.match_tasks.build_result') as scoring:
+            provider.return_value.evaluate_v2.return_value = {
+                'assessments': saved_batch['assessments'], 'model': 'synthetic-model', 'usage': {'total_tokens': 100},
+            }
+            scoring.return_value.model_dump.return_value = {'match_percentage': 50}
+            result = evaluate_match_task.run('synthetic-request')
+            self.assertEqual(provider.return_value.evaluate_v2.call_args.kwargs['completed_batches'], [saved_batch])
+        self.assertEqual(result, {'match_percentage': 50})
+        self.assertEqual(state['status'], 'completed')
