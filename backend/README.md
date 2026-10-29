@@ -13,8 +13,10 @@ alcance.
 
 El análisis del CV usa `cv-extraction.v2-packets-soft.v13-education` y mantiene el perfil ampliado
 `candidate-profile.v2`. Divide el texto en paquetes de hasta
-`CV_PACKET_CHARACTERS` (500 por defecto, limitado por `CV_BLOQUE_CARACTERES`).
-Cada llamada utiliza `CV_EXTRACTION_MAX_TOKENS` (950 por defecto). Si una salida
+`CV_PACKET_CHARACTERS` (500 por defecto en código y 20000 en el ejemplo actual,
+limitado por `CV_BLOQUE_CARACTERES`).
+Cada llamada utiliza `CV_EXTRACTION_MAX_TOKENS` (950 por defecto en código;
+16384 en el ejemplo Gemini actual). Si una salida
 se trunca, solo ese paquete se divide, preservando todo el texto.
 
 El manifiesto y los avances viven dentro del trabajo Redis identificado por su
@@ -193,75 +195,165 @@ Para ejecutar comandos manualmente puedes activarlo con
 `source .venv/bin/activate`. Los comandos de este README y del `Makefile` no
 requieren activarlo porque usan rutas explicitas a `.venv/bin/...`.
 
-### 2. Configurar las variables de entorno
+### 2. Configuración: de dónde sale cada valor del .env
 
-Crea la configuración local:
+Copiar la plantilla desde `ia_api/backend`:
 
 ```bash
 cp .env.example .env
 ```
 
-Edita `.env`. Para la integración local con Django usa, como mínimo:
+En Windows: `Copy-Item .env.example .env`. La plantilla representa el flujo
+actual, **Gemini para extraer CV y Groq para matches**, con puertos locales y
+sin secretos reales. No sobrescribir un `.env` existente sin conservar su
+configuración; este archivo permanece fuera de Git.
 
-```dotenv
-GROQ_API_KEY=tu-clave-de-groq
-CV_MODEL=qwen/qwen3.8-27b
-CELERY_BROKER_URL=redis://localhost:6379/0
-CELERY_RESULT_BACKEND=redis://localhost:6379/1
-CHANNEL_REDIS_URL=redis://localhost:6379/2
-CV_RESULT_CALLBACK_URL=http://127.0.0.1:8000/ia/llegue/
-CV_RESULT_CALLBACK_SECRET=elegi-un-secreto-local
+#### Paso 1: crear las claves de los proveedores
+
+Para **Gemini**:
+
+1. Entrar en [Google AI Studio](https://aistudio.google.com/) con la cuenta del
+   proyecto y abrir la sección de claves API.
+2. Seleccionar o crear el proyecto y crear su clave API. Pegar el valor en
+   `GEMINI_API_KEY`. Ver el [procedimiento oficial](https://ai.google.dev/gemini-api/docs/api-key).
+3. Elegir un modelo disponible para ese proyecto y copiar su ID exacto en
+   `GEMINI_MODEL`. El nombre del ejemplo es el usado por la configuración actual
+   del proyecto y debe verificarse para tu cuenta.
+4. Abrir la información de límites de AI Studio y revisar RPM, TPM y RPD del
+   modelo. Ajustar las variables del paso 4 a esos valores; la
+   [documentación de cuotas](https://ai.google.dev/gemini-api/docs/rate-limits)
+   explica su alcance por proyecto.
+
+Para **Groq**, entrar en [API Keys](https://console.groq.com/keys), crear una
+clave del servicio y pegarla en `GROQ_API_KEY`. Copiar el ID del modelo de match
+desde [los modelos de Groq](https://console.groq.com/docs/models) a
+`MATCH_GROQ_MODEL`. Conservar `MATCH_PROVIDER=groq`; `LLM_PROVIDER=gemini` es
+independiente. `CV_MODEL` solo se usa al cambiar la extracción a Groq, y como
+fallback si no se define un modelo específico de match.
+
+Las claves de estos proveedores van solo en la API. No son tokens del usuario,
+ni claves de CORS, ni los secretos internos que conectan Django con FastAPI.
+
+#### Paso 2: generar y compartir los secretos internos
+
+Ejecutar dos veces y usar resultados distintos:
+
+```bash
+python3.11 -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-La clave `CV_RESULT_CALLBACK_SECRET` debe ser idéntica a
-`IA_CALLBACK_TOKEN` en el `.env` de Django. El modelo indicado está disponible
-para la cuenta de Groq utilizada por este proyecto.
+En Windows, reemplazar `python3.11` por `py -3.11`.
 
-#### Alternativa ligera con Gemini
+| Resultado | API | Django |
+| --- | --- | --- |
+| Primero, token de servicio | `SERVICE_API_TOKEN` | Copiarlo en `IA_API_TOKEN` y `MATCH_API_TOKEN`. |
+| Segundo, firma del callback | `CV_RESULT_CALLBACK_HMAC_SECRET` | Copiarlo en `IA_CALLBACK_HMAC_SECRET`. |
 
-Para usar Gemini Flash-Lite en extracción y compatibilidad, reemplaza la
-selección de proveedor del ejemplo anterior por estos valores en el `.env`
-privado; conserva los secretos de integración entre servicios:
+Django también necesita su propio `SECRET_KEY`, generado por separado. Los
+ejemplos nuevos no piden `JWT_SECRET_KEY`, `SERVICE_USER`, `SERVICE_PASSWORD`,
+`ACCESS_TOKEN_EXPIRE_MINUTES` ni `CV_RESULT_CALLBACK_SECRET`: no se usan como
+credenciales del flujo actual. La ruta HTTP usa Bearer con `SERVICE_API_TOKEN`
+y el callback usa HMAC. El código conserva compatibilidad con el secreto de
+callback antiguo para instalaciones anteriores.
 
-```dotenv
-LLM_PROVIDER=gemini
-MATCH_PROVIDER=groq
-MATCH_GROQ_MODEL=qwen/qwen3.8-27b
-GEMINI_API_KEY=tu-clave-privada-de-ai-studio
-GEMINI_MODEL=gemini-3.5-flash-lite
-# Ejemplo para cuota verificada de 15 RPM / 250.000 TPM / 500 RPD.
-GEMINI_REQUESTS_PER_MINUTE=12
-GEMINI_INPUT_TOKENS_PER_MINUTE=200000
-GEMINI_REQUESTS_PER_DAY=400
-GEMINI_PAUSA_SEGUNDOS=0
-GEMINI_MAX_INPUT_TOKENS_PER_REQUEST=60000
-GEMINI_MAX_OUTPUT_TOKENS=16384
-CV_PACKET_CHARACTERS=20000
-CV_BLOQUE_CARACTERES=20000
-CV_EXTRACTION_MAX_TOKENS=16384
-```
+`CV_RESULT_CALLBACK_URL` es la dirección donde Django recibe el resultado:
+`http://127.0.0.1:8000/ia/llegue/` en local. En la VPS con Caddy y redirección
+HTTPS usar `http://127.0.0.1:8080/ia/llegue/`. El host `127.0.0.1` debe estar
+permitido por Django. Si los servicios están en máquinas/contenedores distintos,
+usar una dirección que el worker pueda alcanzar.
 
-Son límites locales conservadores, no cuotas garantizadas por Google. Consulta
-RPM, TPM y RPD efectivos en Google AI Studio. Una clave nueva del mismo proyecto
-comparte cuotas. La integración usa pensamiento mínimo, JSON validado localmente
-y espera los 429 según las indicaciones del proveedor. El modelo selecciona IDs
-de citas literales preparadas por el servidor; un ID inválido no se convierte
-en evidencia. Un fragmento inválido admite un único reintento de corrección.
+#### Paso 3: CORS, modo y Redis
 
-Los CV se procesan de a uno mediante un lease global Redis, con concurrencia y
-prefetch uno en Celery. La reserva atómica controla RPM, TPM de entrada estimados
-y RPD; la ventana diaria local es móvil de 24 horas. Las esperas diarias liberan
-el worker y reprograman el trabajo. Una hoja válida sin posibles duplicados se
-ensambla en código; múltiples hojas o ambigüedad conservan consolidación LLM.
-Se divide antes de llamar si la entrada supera su presupuesto, o después si la
-salida queda truncada. Los callbacks reciben prioridad para entregar resultados.
+**CORS no tiene una clave.** `BACKEND_CORS_ORIGINS` es una lista JSON de
+orígenes autorizados para llamadas desde el navegador. Un origen combina
+esquema, dominio y puerto; por ejemplo `https://app.example.com`, sin ruta.
+Ver [CORS en FastAPI](https://fastapi.tiangolo.com/tutorial/cors/).
 
-`MATCH_PROVIDER` es independiente de `LLM_PROVIDER`: en esta configuración Gemini
-extrae CV y Groq evalúa compatibilidad. Configurá `GROQ_API_KEY` en el `.env`
-privado. En Django usa `MATCH_MODEL_VERSION=groq:qwen/qwen3.8-27b:strict-low`;
-`scripts/configure_ia_match.py` sincroniza ese valor sin cambiar el proveedor
-de extracción. Reinicia API, worker y procesos Django después de cambiar la
-configuración, cuando no haya trabajos en curso. No guardes claves en código ni informes.
+En esta aplicación Django llama a la API entre servidores, por lo que usar
+`BACKEND_CORS_ORIGINS=[]`. Un frontend separado podría necesitar su propio
+origen en esa lista, pero CORS no reemplaza Bearer ni permite publicar el token
+de servicio en JavaScript del navegador.
+
+| Variable | Origen del valor |
+| --- | --- |
+| `PROJECT_NAME` | Nombre que elegís para la documentación de la API. No es el ID de Google Cloud. |
+| `MODE` | `development` en local; `production` en la VPS. |
+| `CELERY_BROKER_URL` | Tu servidor Redis, base lógica `/0`, usada para la cola. |
+| `CELERY_RESULT_BACKEND` | El mismo Redis, base `/1`, usada por los resultados Celery. |
+| `JOB_STORE_REDIS_URL` | Redis `/2`: trabajos y limitador de cuota. |
+| `CHANNEL_REDIS_URL` | Redis `/3`: misma URL que Django para notificaciones. |
+| `MATCH_REDIS_URL` | Redis `/4`: estado de compatibilidades. |
+| `JOB_TTL_SECONDS` | Tiempo de conservación de trabajos; `2592000` son 30 días. |
+
+Con el Redis local del Compose, conservar `redis://127.0.0.1:6379/N`. Para una
+instancia administrada, copiar host, puerto, contraseña y esquema de conexión
+del proveedor, manteniendo separadas las bases que soporte. Redis no genera
+una clave API de Gemini o de CORS.
+
+#### Paso 4: presupuestos de IA
+
+Los valores del ejemplo reflejan el ajuste local del proyecto. Son límites de
+la aplicación; **no conceden cuota** al proveedor ni acreditan que tu cuenta la
+tenga. Si tu panel tiene límites menores, bajarlos antes de usar el servicio.
+
+| Variables | Cómo elegir el valor |
+| --- | --- |
+| `GEMINI_REQUESTS_PER_MINUTE` | Máximo local de solicitudes por minuto, dentro del RPM del proyecto/modelo. |
+| `GEMINI_INPUT_TOKENS_PER_MINUTE` | Presupuesto local de entrada estimada por minuto; compararlo con el TPM efectivo. |
+| `GEMINI_REQUESTS_PER_DAY` | Tope local de solicitudes diarias; el programa usa una ventana móvil de 24 horas. |
+| `GEMINI_MAX_INPUT_TOKENS_PER_REQUEST` | Presupuesto de entrada por llamada, compatible con el modelo y su cuota. |
+| `GEMINI_MAX_OUTPUT_TOKENS` | Límite de salida pedido al proveedor; no superar lo admitido por el modelo. |
+| `GEMINI_PAUSA_SEGUNDOS` | Pausa local adicional entre llamadas; el ejemplo usa `0` y el limitador Redis controla la cuota. |
+| `CV_PACKET_CHARACTERS` / `CV_BLOQUE_CARACTERES` | Tamaño de paquetes y tope de fragmentos, en caracteres; el ejemplo usa `20000`. No son tokens. |
+| `CV_EXTRACTION_MAX_TOKENS` | Presupuesto de salida de extracción; el ajuste actual usa `16384` y se divide el paquete cuando es necesario. |
+| `GROQ_REQUESTS_PER_MINUTE` | Máximo local de llamadas Groq; verificar los límites de la cuenta/modelo en su consola. |
+| `GROQ_PAUSA_SEGUNDOS` / `GROQ_MAX_TOKENS` | Pausa entre consultas y máximo de salida Groq. |
+| `MATCH_GROQ_MAX_TOKENS` | Presupuesto de salida del comparador; conservar el ejemplo salvo ajuste verificado. |
+
+Una nueva clave del mismo proyecto no resetea sus cuotas. Si cambiás de
+proveedor de extracción, también hay que adaptar modelo y presupuestos. OpenAI
+es una alternativa implementada en código, pero no forma parte del ejemplo
+activo Gemini/Groq; requiere su propia configuración específica.
+
+#### Paso 5: archivos y componentes opcionales
+
+| Variables | Qué representan |
+| --- | --- |
+| `CV_MAX_PDF_BYTES` | Tamaño máximo de archivo; `5242880` son 5 MiB. |
+| `CV_MAX_PDF_PAGES` / `CV_MAX_TEXT_CHARACTERS` | Máximo de páginas PDF y longitud de texto; `20` y `100000` en el ejemplo. |
+| `CV_MAX_ARCHIVE_BYTES` / `CV_MAX_ARCHIVE_ENTRIES` | Tamaño descomprimido y cantidad de entradas máximas para documentos Office. |
+| `CV_MAX_UPLOAD_BODY_OVERHEAD` | Margen de bytes para campos/cabeceras multipart además del archivo. |
+| `CV_EXTRACT_TIMEOUT_SECONDS` | Tiempo máximo para el proceso de extracción documental. |
+| `CV_ARTIFACT_DIR` | Directorio privado elegido por vos; relativo a `backend` o una ruta absoluta con permisos para API y Celery. No publicarlo como archivos estáticos. |
+| `CV_LEGACY_CONVERTER_IMAGE` | Tag de la imagen Docker que construís con `docker/cv-converter.Dockerfile`. Vacío deshabilita DOC/RTF; PDF/DOCX/ODT/TXT siguen funcionando. |
+| `CV_DOCKER_COMMAND` / `CV_LEGACY_CONVERSION_TIMEOUT_SECONDS` | Ejecutable Docker y timeout del conversor opcional. |
+| `CV_RAG_CONTEXT_MAX_CHARACTERS` | Máximo de contexto de catálogo entregado a la extracción. |
+| `SKILL_CATALOG_DATABASE_URL` | URL PostgreSQL/pgvector del catálogo opcional; vacío usa el catálogo JSON. No es la BD de negocio de Django. |
+| `SKILL_CATALOG_DB_PASSWORD` | Contraseña que generás para el rol `skill_catalog` al usar `docker-compose.rag.yml`. Solo Compose lee esta variable. |
+| `SKILL_CATALOG_EMBEDDING_MODEL` / `SKILL_CATALOG_EMBEDDING_DIMENSIONS` | ID del modelo de embeddings y dimensiones de sus vectores; deben coincidir con la importación y el esquema del catálogo. |
+
+Para RAG, generar una contraseña distinta, levantar la base según la sección
+«Contexto RAG de habilidades» y formar la URL con el usuario `skill_catalog`,
+la contraseña elegida, `127.0.0.1:5434` y la base `ien_skill_catalog`. Si la
+contraseña incluye caracteres reservados, codificarla como componente de URL.
+Ejecutar la importación indicada en esa sección antes de habilitar el catálogo.
+
+#### Paso 6: cambios de VPS y comprobación
+
+Cambiar `MODE=production` y el callback a `8080`. En Django configurar
+`DEBUG=false`, PostgreSQL, el dominio HTTPS, el proxy y SMTP según su
+[guía VPS](https://github.com/Deathstone16/BolsaTrabajo/blob/develop/docs/DESPLIEGUE_VPS.md).
+El paso a paso del correo y de la contraseña de aplicación Gmail está en el
+[README de Django](https://github.com/Deathstone16/BolsaTrabajo/blob/develop/README.md).
+
+Completar los dos `.env` y ejecutar desde el entorno Django
+`python deploy/check_config.py` con las rutas de VPS por defecto, o pasar
+`--django-root` y `--api-root` si la distribución de carpetas es otra. Es un
+verificador de **producción**, no un validador de los ejemplos de desarrollo.
+No imprime secretos ni confirma claves externas. Reiniciar API, Celery,
+Django y los despachadores tras modificar la configuración, cuando no haya
+trabajos en curso.
+
 
 ### 3. Preparar Django
 
@@ -270,14 +362,16 @@ el `.env` y ejecuta migraciones. Los valores necesarios son:
 
 ```dotenv
 IA_API_URL=http://127.0.0.1:8001/api/v1/cv-analyses
-IA_CALLBACK_TOKEN=elegi-un-secreto-local
-CHANNEL_REDIS_URL=redis://localhost:6379/2
+IA_API_TOKEN=el-mismo-SERVICE_API_TOKEN-de-la-API
+MATCH_API_TOKEN=el-mismo-SERVICE_API_TOKEN-de-la-API
+IA_CALLBACK_HMAC_SECRET=el-mismo-CV_RESULT_CALLBACK_HMAC_SECRET-de-la-API
+CHANNEL_REDIS_URL=redis://127.0.0.1:6379/3
 ```
 
-Consulta el [README de Django](../../repositorio/BolsaTrabajo/README.md)
+Consulta el [README de Django](https://github.com/Deathstone16/BolsaTrabajo/blob/develop/README.md)
 para los comandos completos.
 
-### 4. Iniciar los cuatro servicios
+### 4. Iniciar los servicios
 
 En terminales separadas:
 
@@ -377,14 +471,15 @@ Al completar exitosamente, el worker envia un `POST` a
 ```
 
 Al fallar despues de todos los reintentos, envia el mismo contrato con
-`status: "failed"`, `result: null` y un mensaje en `error`. Si configuraste
-`CV_RESULT_CALLBACK_SECRET`, tambien se envia el header:
+`status: "failed"`, `result: null` y un mensaje en `error`. La configuración
+actual usa `CV_RESULT_CALLBACK_HMAC_SECRET` y envía:
 
 ```text
-X-IA-Callback-Token: tu-secreto-compartido
+X-IA-Event-Timestamp: marca-de-tiempo-del-evento
+X-IA-Callback-Signature: firma-hmac-del-timestamp-y-cuerpo
 ```
 
-La otra aplicacion debe verificar ese valor antes de aceptar el callback y debe
+La otra aplicación verifica la firma con `IA_CALLBACK_HMAC_SECRET` antes de aceptar el callback y debe
 guardar `job_id` para tratar mensajes repetidos de forma idempotente. Un callback
 puede repetirse por reintentos aunque el primer POST haya llegado pero su
 respuesta se haya perdido.
@@ -397,7 +492,7 @@ respuesta se haya perdido.
   funcion de la ruta los use.
 - **Celery**: serializa una tarea y la ejecuta en procesos worker escalables.
 - **Redis**: transporta la tarea entre FastAPI y el worker y almacena estados.
-- **Groq**: realiza la extraccion y consolidacion con el modelo configurado.
+- **Gemini/Groq**: realizan la extracción y la compatibilidad según `LLM_PROVIDER` y `MATCH_PROVIDER`.
 - **httpx**: hace la solicitud HTTP saliente al sistema receptor.
 
 ## Desarrollo y problemas habituales
@@ -413,19 +508,9 @@ respuesta se haya perdido.
   del servicio Docker correspondiente en las URLs.
 - No uses `BackgroundTasks` para este trabajo: corre dentro del mismo proceso
   web, se pierde al reiniciar y no ofrece una cola durable ni reintentos.
-# Rama ia-match
-
-Integra la extracción idempotente de `ia-aplicada` con el aviso de Benja.
-Expone `POST /api/v1/cv-analyses`, `/offer-analyses` y `/profile-normalizations`
-autenticados por Bearer token. El callback firmado guarda perfiles versionados
-en Django; después se publica la notificación Redis para `user_<user_id>`.
-
-El porcentaje se calcula con Groq dentro de esta misma API. CV, ofertas, normalización y compatibilidad comparten servidor en 8001, token de servicio y worker Celery. Para iniciar la pila:
-`C:\IEN\repositorio\BolsaTrabajo\scripts\start_ia_match.ps1`.
-
 ## API única: CV y compatibilidad
 
-La rama `ia-match` sirve todas las operaciones desde `app.main:app`, puerto 8001.
+La API actual sirve todas las operaciones desde `app.main:app`, puerto 8001.
 
 - `POST /api/v1/cv-analyses`: analiza un CV.
 - `POST /api/v1/offer-analyses`: estructura una oferta.
