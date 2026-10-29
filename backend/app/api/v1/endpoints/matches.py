@@ -53,6 +53,15 @@ async def get_match(request_id: str, _: None = Depends(require_service_token)) -
     }
 
 
+@router.post('/matches/{request_id}/cancel')
+def cancel_match(request_id: str, _: None = Depends(require_service_token)) -> dict:
+    try:
+        job = MatchJobStore().cancel(request_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail='No se pudo cancelar la compatibilidad.') from exc
+    return {'request_id': request_id, 'status': job['status']}
+
+
 @router.websocket("/ws/v1/matches")
 async def match_socket(websocket: WebSocket) -> None:
     if not is_valid_service_token(bearer_token(websocket.headers.get("authorization"))):
@@ -75,7 +84,7 @@ async def match_socket(websocket: WebSocket) -> None:
                         message["error"] = job["error"]
                     await websocket.send_json(message)
                     last_message_at = asyncio.get_running_loop().time()
-                    if job["status"] in {"completed", "failed"}:
+                    if job["status"] in {"completed", "failed", "cancelled"}:
                         request_id = None
                 elif job and asyncio.get_running_loop().time() - last_message_at >= MATCH_WEBSOCKET_HEARTBEAT_SECONDS:
                     # El dispatcher mantiene una conexión por trabajo; sin

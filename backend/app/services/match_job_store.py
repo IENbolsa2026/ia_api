@@ -36,6 +36,10 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class MatchCancelled(RuntimeError):
+    """La cancelación invalida el lease y evita publicar resultados tardíos."""
+
+
 class MatchJobStore:
     def __init__(self, client: redis.Redis | None = None) -> None:
         self.client = client or redis.from_url(settings.MATCH_REDIS_URL, decode_responses=True)
@@ -56,6 +60,8 @@ class MatchJobStore:
             job = self.get(current)
             if job is None:
                 raise RuntimeError("The match job mapping points to a missing job.")
+            if job['status'] == 'cancelled':
+                return job, False
             if job["request_hash"] != request_hash:
                 raise ValueError("The request_id was already used with another payload.")
             return job, False
@@ -77,6 +83,8 @@ class MatchJobStore:
             job = self.get(request_id)
             if job is None:
                 raise RuntimeError("The match job expired before its mapping was saved.")
+            if job.get('status') == 'cancelled':
+                return job, False
             if job["request_hash"] != request_hash:
                 raise ValueError("The request_id was already used with another payload.")
         if not self.client.set(mapping_key, request_id, ex=settings.JOB_TTL_SECONDS, nx=True):
@@ -103,6 +111,29 @@ class MatchJobStore:
             self._lock_tokens[request_id] = token
         return acquired
 
+    def cancel(self, request_id: str) -> dict[str, Any]:
+        key = self._job_key(request_id)
+        while True:
+            with self.client.pipeline() as transaction:
+                try:
+                    transaction.watch(key)
+                    raw = transaction.get(key)
+                    job = json.loads(raw) if raw is not None else {
+                        'request_id': request_id, 'status': 'accepted',
+                        'request_hash': None, 'request': {}, 'result': None,
+                        'created_at': utc_now(),
+                    }
+                    if job['status'] in {'completed', 'failed', 'cancelled'}:
+                        return job
+                    job.update(status='cancelled', error=None, updated_at=utc_now())
+                    transaction.multi()
+                    transaction.set(key, json.dumps(job), ex=settings.JOB_TTL_SECONDS)
+                    transaction.delete(f'jev-match:lock:{request_id}')
+                    transaction.execute()
+                    return job
+                except redis.WatchError:
+                    continue
+
     def update_owned(self, request_id: str, **changes: Any) -> dict[str, Any]:
         token = self._lock_tokens.get(request_id)
         if token is None:
@@ -110,6 +141,8 @@ class MatchJobStore:
         job = self.get(request_id)
         if job is None:
             raise LockOwnershipLost("La solicitud expiró antes de guardar el resultado.")
+        if job['status'] == 'cancelled':
+            raise MatchCancelled(request_id)
         job.update(changes)
         job["updated_at"] = utc_now()
         updated = self.client.eval(
@@ -117,6 +150,9 @@ class MatchJobStore:
             token, settings.JOB_TTL_SECONDS, 600, json.dumps(job),
         )
         if not updated:
+            current = self.get(request_id)
+            if current and current['status'] == 'cancelled':
+                raise MatchCancelled(request_id)
             raise LockOwnershipLost("Se perdió el lease antes de guardar la compatibilidad.")
         return job
 

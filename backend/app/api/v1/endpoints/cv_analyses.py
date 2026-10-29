@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.core.security import require_service_token
 from app.schemas.cv_analysis import CVAnalysisAccepted, CVAnalysisStatus, CVAnalysisTaskStatus
 from app.services.job_store import ExtractionJobStore
-from app.services.cv_artifacts import CVArtifactError, artifact_path, delete_artifact, scan_artifact, scanner_available
+from app.services.cv_artifacts import artifact_path, delete_artifact
 from app.services.document_text import DocumentRejected, detect_format, enabled_formats, legacy_converter_available
 from ien_contracts.utils import content_hash
 from app.tasks.cv_analysis_tasks import run_extraction_task
@@ -111,9 +111,6 @@ async def cv_capabilities(_: None = Depends(require_service_token)) -> dict:
             "doc": "Requiere Docker y una imagen de conversión aislada configurada.",
             "rtf": "Requiere Docker y una imagen de conversión aislada configurada.",
         },
-        "security_scan_enabled": settings.CV_SCAN_ENABLED,
-        "security_scan_required": settings.MODE.value == "production" or settings.CV_SCAN_ENABLED,
-        "security_scan_status": "configurado" if settings.CV_SCAN_ENABLED and scanner_available() else "fallido" if settings.CV_SCAN_ENABLED else "deshabilitado; el archivo no se declara analizado",
     }
 
 
@@ -130,12 +127,6 @@ def _persist_and_submit_cv(key: str, source_hash: str, semantic_hash: str, cv_by
         except FileExistsError:
             if hashlib.sha256(path.read_bytes()).hexdigest() != source_hash:
                 raise HTTPException(status_code=409, detail="Ya existe un trabajo para esa clave con otro archivo.")
-        try:
-            scan_artifact(path)
-        except CVArtifactError as exc:
-            if artifact_created:
-                delete_artifact(artifact_id, document_format)
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
         stored_payload = {**payload, "artifact_id": artifact_id, "format": document_format}
         response = _submit(key, semantic_hash, stored_payload)
         if artifact_created and response.status == CVAnalysisStatus.completed:

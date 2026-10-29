@@ -1,4 +1,3 @@
-from contextlib import asynccontextmanager
 import json
 
 from fastapi import FastAPI, Request
@@ -9,7 +8,6 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.v1.api import api_router as api_router_v1
 from app.core.config import settings
 from app.core.security import is_valid_service_token
-from app.services.cv_artifacts import scanner_available
 
 
 class CVUploadGuard:
@@ -74,28 +72,12 @@ class CVUploadGuard:
         await self.app(scope, replay, send)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Hook de ciclo de vida de FastAPI.
-
-    FastAPI ejecuta el codigo anterior a ``yield`` al iniciar y el posterior al
-    detenerse. Es el lugar indicado para abrir/cerrar recursos compartidos si
-    mas adelante se agregan conexiones propias de la API web.
-    """
-
-    if settings.MODE.value == "production" and not settings.CV_SCAN_ENABLED:
-        raise RuntimeError("En producción se requiere un escáner de CV configurado.")
-    if settings.CV_SCAN_ENABLED and not scanner_available():
-        raise RuntimeError("CV_SCAN_ENABLED requiere una ruta válida a un escáner.")
-    yield
-
 # Esta es la aplicacion ASGI que Uvicorn sirve. FastAPI usa las anotaciones de
 # tipo y los modelos Pydantic de las rutas para validar JSON y generar /docs.
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.API_VERSION,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    lifespan=lifespan,
 )
 app.add_middleware(CVUploadGuard)
 

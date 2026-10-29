@@ -119,11 +119,16 @@ contenedor sin red, usuario no privilegiado, filesystem de solo lectura,
 límites de memoria/CPU/procesos y timeout. Si no se configura, la API no anuncia
 ni acepta esos formatos.
 
+Para desplegar junto a Django, seguir la guía `docs/DESPLIEGUE_VPS.md` de
+BolsaTrabajo. `requirements.lock` fija las dependencias de Python 3.11 con
+hashes; instalarlo con `uv pip sync --require-hashes requirements.lock`.
+
+La cancelación de Django se entrega a `POST /api/v1/matches/{request_id}/cancel`
+con el token de servicio. Impide publicar un resultado tardío y continuar los
+siguientes lotes; una llamada ya enviada al proveedor puede terminar en curso.
+
 La extracción PDF/DOCX/ODT corre en un proceso separado con timeout y memoria
-limitada. En producción, `CV_SCAN_ENABLED=true` y `CV_SCAN_COMMAND` deben
-apuntar a un escáner existente; sin escaneo obligatorio la aplicación no inicia.
-En desarrollo con escaneo deshabilitado la capacidad lo informa y no se declara
-el archivo como seguro. Un error del escáner rechaza la carga.
+limitada. Se validan formato, tamaño y contenido antes de procesar el documento.
 
 Este proyecto recibe CVs en formatos habilitados, extrae su texto y lo analiza
 en segundo plano; luego envia el resultado JSON a otra aplicacion mediante un

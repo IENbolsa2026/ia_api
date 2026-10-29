@@ -39,8 +39,7 @@ class CreateCVAnalysisTests(unittest.TestCase):
 
     @patch("app.api.v1.endpoints.cv_analyses.celery_app.send_task")
     @patch("app.api.v1.endpoints.cv_analyses.ExtractionJobStore")
-    @patch("app.api.v1.endpoints.cv_analyses.scan_artifact")
-    def test_valid_pdf_is_queued_in_celery(self, scan_mock, store_cls, send_task) -> None:
+    def test_valid_pdf_is_queued_in_celery(self, store_cls, send_task) -> None:
         """Un PDF válido se serializa y Celery devuelve el identificador."""
         store_cls.return_value.create_or_get.return_value = ({"job_id": "job-123", "status": "accepted"}, True)
 
@@ -54,8 +53,7 @@ class CreateCVAnalysisTests(unittest.TestCase):
 
     @patch("app.api.v1.endpoints.cv_analyses.celery_app.send_task")
     @patch("app.api.v1.endpoints.cv_analyses.ExtractionJobStore")
-    @patch("app.api.v1.endpoints.cv_analyses.scan_artifact")
-    def test_optional_cv_version_is_persisted_only_when_supplied(self, _scan, store_cls, _send_task) -> None:
+    def test_optional_cv_version_is_persisted_only_when_supplied(self, store_cls, _send_task) -> None:
         store_cls.return_value.create_or_get.return_value = ({"job_id": "job-version", "status": "accepted"}, True)
         response = self.client.post(
             "/api/v1/cv-analyses",
@@ -105,8 +103,7 @@ class CreateCVAnalysisTests(unittest.TestCase):
 
     @patch("app.api.v1.endpoints.cv_analyses.celery_app.send_task")
     @patch("app.api.v1.endpoints.cv_analyses.ExtractionJobStore")
-    @patch("app.api.v1.endpoints.cv_analyses.scan_artifact")
-    def test_txt_is_queued_even_when_client_claims_pdf_mime(self, scan_mock, store_cls, send_task) -> None:
+    def test_txt_is_queued_even_when_client_claims_pdf_mime(self, store_cls, send_task) -> None:
         store_cls.return_value.create_or_get.return_value = ({"job_id": "job-txt", "status": "accepted"}, True)
         response = self.client.post(
             "/api/v1/cv-analyses", data=self.form_data,
@@ -117,7 +114,6 @@ class CreateCVAnalysisTests(unittest.TestCase):
         stored = store_cls.return_value.create_or_get.call_args.args[2]
         self.assertEqual(stored["format"], "txt")
         self.assertEqual(stored["source_hash"], __import__("hashlib").sha256(b"Experiencia como chofer").hexdigest())
-        scan_mock.assert_called_once()
         send_task.assert_called_once()
 
     @patch("app.api.v1.endpoints.cv_analyses.celery_app.send_task")
