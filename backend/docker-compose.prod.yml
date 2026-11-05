@@ -1,0 +1,54 @@
+name: ia-api
+
+x-app: &app
+  image: ia-api:local
+  build: .
+  init: true
+  restart: unless-stopped
+  env_file: .env.compose
+  environment:
+    MODE: production
+    CV_ARTIFACT_DIR: /app/private_cv_artifacts
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CELERY_RESULT_BACKEND: redis://redis:6379/1
+    JOB_STORE_REDIS_URL: redis://redis:6379/2
+    CHANNEL_REDIS_URL: ${CHANNEL_REDIS_URL:-redis://redis:6379/3}
+    MATCH_REDIS_URL: redis://redis:6379/4
+  volumes:
+    - cv_artifacts:/app/private_cv_artifacts
+  depends_on:
+    redis:
+      condition: service_healthy
+
+services:
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:${IA_API_PORT:-8001}:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8001/', timeout=3).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    <<: *app
+    command: ["celery", "-A", "app.core.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo"]
+    stop_grace_period: 2m
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  cv_artifacts:
+  redis_data:

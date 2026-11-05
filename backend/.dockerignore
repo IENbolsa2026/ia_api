@@ -1,0 +1,9 @@
+**
+!Dockerfile
+!requirements.lock
+!app/
+!app/**
+!ien_contracts/
+!ien_contracts/**
+**/__pycache__/
+**/*.py[cod]
