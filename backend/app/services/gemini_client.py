@@ -17,8 +17,8 @@ import httpx
 import redis
 
 from app.core.config import settings
-from app.services.gemini_cv_schema import cv_response_schema
-from app.services.gemini_budget import GeminiBudgetLimiter, estimate_input_tokens
+from app.services.cv_request_budget import prepare_gemini_input
+from app.services.gemini_budget import GeminiBudgetLimiter
 from app.services.rate_limiter import (
     LUA_RECORD_RESPONSE, ProviderInputLimitExceeded, ProviderResponseTruncated, RateLimitExceeded, RedisRateLimiter,
     reset_duration_seconds, retry_after_seconds,
@@ -58,6 +58,12 @@ class GeminiRateLimiter(RedisRateLimiter):
             settings.GEMINI_MAX_INPUT_TOKENS_PER_REQUEST,
         )
         budget.reserve(member, estimated_tokens)
+        self._input_budget = budget
+
+    def record_usage(self, input_tokens: int | None) -> None:
+        budget = getattr(self, '_input_budget', None)
+        if budget is not None:
+            budget.record_usage(input_tokens)
 
 
 def gemini_rate_limiter(model: str) -> RedisRateLimiter:
@@ -148,14 +154,13 @@ def generate_json(system_prompt: str, user_payload: str, marker: str,
     config: dict[str, Any] = {
         'temperature': 0, 'maxOutputTokens': budget, 'responseMimeType': 'application/json',
     }
-    cv_schema = cv_response_schema(user_payload)
+    user_payload, cv_schema, estimate = prepare_gemini_input(system_prompt, user_payload)
     if cv_schema is not None:
         config['responseJsonSchema'] = cv_schema
     if model.startswith('gemini-3') and 'flash-lite' in model:
         config['thinkingConfig'] = {'thinkingLevel': 'minimal'}
     elif model.startswith('gemini-2.5'):
         config['thinkingConfig'] = {'thinkingBudget': 0}
-    estimate = estimate_input_tokens(system_prompt + user_payload)
     input_limit = min(settings.GEMINI_MAX_INPUT_TOKENS_PER_REQUEST, settings.GEMINI_INPUT_TOKENS_PER_MINUTE)
     if estimate > input_limit:
         raise ProviderInputLimitExceeded(estimate, input_limit)
@@ -196,11 +201,18 @@ def generate_json(system_prompt: str, user_payload: str, marker: str,
         raise RateLimitExceeded(max(delay, wait), reason='daily_budget' if daily_quota else 'provider') from None
     if response.status_code >= 400:
         raise GeminiError(f'El proveedor rechazó la solicitud de análisis (HTTP {response.status_code}).')
-    limiter.record_response(response.headers, status_code=response.status_code, estimated_tokens=estimate)
+    try:
+        limiter.record_response(response.headers, status_code=response.status_code, estimated_tokens=estimate)
+    except redis.RedisError:
+        logger.warning('Gemini response received; quota bookkeeping unavailable status=%d', response.status_code)
     try:
         body = response.json()
         if not isinstance(body, dict):
             raise ValueError
+        try:
+            limiter.record_usage(_usage(body).get('prompt_tokens'))
+        except redis.RedisError:
+            logger.warning('Gemini response received; input reservation reconciliation unavailable')
         candidates = body.get('candidates')
         if not isinstance(candidates, list) or not candidates or not isinstance(candidates[0], dict):
             raise ValueError

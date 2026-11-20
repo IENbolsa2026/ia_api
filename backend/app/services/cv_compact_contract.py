@@ -260,12 +260,14 @@ def expand_profile(raw: dict, source_text: str, candidate_id: int) -> dict:
     return expanded
 
 
-def validate_expanded_profile(profile: dict, source_text: str, candidate_id: int) -> dict:
+def validate_expanded_profile(profile: dict, source_text: str, candidate_id: int, *,
+                              preserve_skill_groups: bool = False) -> dict:
     """Ground academic state and enforce the vocabulary before publishing a profile."""
     validate_credential_completion(profile.get('credentials', []))
     profile = safe_academic_narrative({
         **_decode_generated_text(profile),
-        'skills': normalize_expanded_skills(_decode_generated_text(profile.get('skills', [])), source_text=source_text),
+        'skills': normalize_expanded_skills(_decode_generated_text(profile.get('skills', [])),
+                                           source_text=source_text, preserve_groups=preserve_skill_groups),
         'education': ground_education(retain_explicit_courses(
             retain_explicit_academic_education(profile.get('education', []), source_text),
             source_text,
@@ -274,6 +276,7 @@ def validate_expanded_profile(profile: dict, source_text: str, candidate_id: int
     profile['skills'] = normalize_expanded_skills(
         _restore_project_list_skills(profile.get('skills', []), profile.get('projects', [])),
         source_text=source_text,
+        preserve_groups=preserve_skill_groups,
     )
     profile['skills'] = _calibrate_project_skill_levels(profile['skills'], profile.get('projects', []))
     try:

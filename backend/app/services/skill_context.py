@@ -89,7 +89,8 @@ def _select_domains(text: str, hits: list[SkillCatalogHit]) -> tuple[str, ...]:
 
 
 async def build_cv_skill_context(text: str, *, max_chars: int = 16000,
-                                 store: SkillCatalogStore | None = None) -> str:
+                                 store: SkillCatalogStore | None = None,
+                                 compact: bool = False) -> str:
     """Return model instructions and retrieved definitions, never CV evidence.
 
     The caller still supplies the original CV text. The catalog is only a guide
@@ -126,15 +127,25 @@ async def build_cv_skill_context(text: str, *, max_chars: int = 16000,
             "Una similitud vectorial propone candidatos, no autoriza inferencias. "
             "Si el CV nombra una competencia que no aparece aquí, extraela igualmente."
         )
+        if compact:
+            # The efficient extraction prompt already contains the complete
+            # taxonomy, levels and attribution policy. Retrieve only relevant
+            # concept cards instead of repeating those instructions per packet.
+            parts = ["Catálogo orientativo, no evidencia del CV. No omitas competencias fuera del catálogo."]
+            max_chars = min(max_chars, 2000)
         total = sum(len(part) + 2 for part in parts)
+        card_count = 0
         for hit in hits:
             card = _card(hit)
             if total + len(card) + 2 > max_chars:
+                if compact:
+                    continue
                 break
             parts.append(card)
             total += len(card) + 2
+            card_count += 1
         logger.info("CV RAG context segments=%d concepts=%d domains=%s chars=%d backend=%s",
-                    len(segments), len(parts) - 4 - len(domains), ",".join(domains),
+                    len(segments), card_count, ",".join(domains),
                     total, getattr(catalog, "last_search_backend", "local"))
         return "\n\n".join(parts)
     finally:

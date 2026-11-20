@@ -128,6 +128,28 @@ falla una vez con el presupuesto requerido: no divide indefinidamente ni
 lo presenta como límite de salida. El máximo efectivo de salida es el menor
 entre `CV_EXTRACTION_MAX_TOKENS` y `GEMINI_MAX_OUTPUT_TOKENS`.
 
+La versión interna `cv-extraction.v2-packets-soft.v14-efficient` activa el
+transporte económico de Gemini: texto una sola vez, citas anotadas, esquema
+nativo, contexto de catálogo de hasta 2000 caracteres y consolidación local sin
+otra solicitud de IA. Mantiene las cuotas configuradas. Las esperas de cuota
+ceden el worker y reanudan desde los paquetes guardados. La versión anterior
+v13 puede reanudarse con su política original cuando identidad, archivo,
+proveedor/modelo y configuración siguen coincidiendo. No borres sus registros
+para actualizar. Los resultados ya completados se mantienen.
+
+Los límites públicos siguen siendo 20 páginas, 100.000 caracteres y los máximos
+del perfil compartido (por ejemplo, 20 registros de formación). Un CV puede
+superar esos máximos aunque tenga pocas páginas. La optimización no descarta
+hechos para forzarlos a caber ni amplía las cuotas de la cuenta.
+
+Antes de actualizar, preferí terminar los trabajos activos. Después recreá API
+y worker con los mismos valores de entorno. No hace falta cambiar Django,
+sus servicios ni el archivo `.env.compose` para activar esta optimización si
+ya usa Gemini y los tamaños de paquete indicados arriba.
+
+La medición local se ejecuta con `python -B scripts/benchmark_cv_budget.py`.
+Solo usa datos sintéticos y no envía solicitudes a proveedores ni a Redis.
+
 Después de cambiar `.env.compose`, recreá API y worker. Un `restart` por sí
 solo no actualiza el entorno del contenedor:
 

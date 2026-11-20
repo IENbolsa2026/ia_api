@@ -14,6 +14,7 @@ from app.services.cv_compact_contract import salvage_fragment, validate_expanded
 from app.services.cv_consolidation import (
     ConsolidationPlan,
     compact_facts_for_plan,
+    local_consolidation_plan,
     validate_and_build_profile_with_effective_plan,
 )
 from app.core.config import settings
@@ -21,9 +22,12 @@ from app.services.skill_context import build_cv_skill_context
 from app.services.prompt_loader import load_prompt
 from app.services.gemini_budget import estimate_input_tokens
 from app.services.rate_limiter import ProviderInputLimitExceeded, ProviderResponseTruncated
+from app.services.cv_request_budget import prepare_gemini_input
 
 
 PACKET_MANIFEST_VERSION = "cv-packets.v2"
+CV_EFFICIENT_PROMPT_VERSION = "cv-extraction.v2-packets-soft.v14-efficient"
+CV_PREVIOUS_PROMPT_VERSION = "cv-extraction.v2-packets-soft.v13-education"
 _PREVIOUS_PACKET_MANIFEST_VERSION = "cv-packets.v1"
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,15 @@ class CVProfileValidationError(ValueError):
 
     def __init__(self) -> None:
         super().__init__("No se pudo validar el contenido extraído del CV. Revisá el documento y volvé a intentarlo.")
+
+
+def checkpoint_prompt_version(checkpoint: dict | None) -> str:
+    """Resume the preceding grounded protocol without mixing prompt policies."""
+    if isinstance(checkpoint, dict):
+        identity = checkpoint.get('identity')
+        if isinstance(identity, dict) and identity.get('prompt_version') == CV_PREVIOUS_PROMPT_VERSION:
+            return CV_PREVIOUS_PROMPT_VERSION
+    return CV_EFFICIENT_PROMPT_VERSION
 
 
 def _quote_catalog(text: str) -> dict[str, str]:
@@ -84,7 +97,11 @@ def _resolve_quote_ids(raw: dict, catalog: dict[str, str]) -> dict:
             if isinstance(quotes, str):
                 quotes = [quotes]
             if isinstance(quotes, list):
-                entry["q"] = [catalog.get(quote, quote) if isinstance(quote, str) else quote for quote in quotes]
+                entry["q"] = [
+                    catalog.get('quote_' + quote[1:], quote) if isinstance(quote, str) and re.fullmatch(r'q\d+', quote)
+                    else catalog.get(quote, quote) if isinstance(quote, str) else quote
+                    for quote in quotes
+                ]
     return value
 
 
@@ -361,14 +378,18 @@ def validate_manifest(
         if cursor != len(text):
             raise PacketsIdentityError()
         try:
+            profile_options = ({'preserve_skill_groups': True}
+                               if expected_identity.get('provider') == 'gemini'
+                               and expected_identity.get('prompt_version') == CV_EFFICIENT_PROMPT_VERSION else {})
             rebuilt, effective_plan = validate_and_build_profile_with_effective_plan(
                 consolidation["plan"], fragments, int(expected_identity["candidate_id"]),
             )
             if not rebuilt.get("summary"):
                 rebuilt["summary"] = _fragment_summary(fragments)
-            rebuilt = validate_expanded_profile(rebuilt, text, int(expected_identity["candidate_id"]))
+            rebuilt = validate_expanded_profile(rebuilt, text, int(expected_identity["candidate_id"]), **profile_options)
             expanded = validate_expanded_profile(
                 consolidation["result"], text, int(expected_identity["candidate_id"]),
+                **profile_options,
             )
         except Exception:
             raise PacketsIdentityError() from None
@@ -473,6 +494,8 @@ async def process_packetized_cv_text(
 ) -> tuple[dict[str, Any], str | None]:
     previous_schema = checkpoint.get("schema_version") if isinstance(checkpoint, dict) else None
     manifest = new_manifest(text, identity) if checkpoint is None else validate_manifest(checkpoint, text, identity)
+    efficient = (identity.get('provider') == 'gemini'
+                 and identity.get('prompt_version') == CV_EFFICIENT_PROMPT_VERSION)
 
     async def save() -> None:
         if on_checkpoint is None:
@@ -503,10 +526,12 @@ async def process_packetized_cv_text(
             return
         packet_text = text[packet["start"]:packet["end"]]
         quote_catalog = _quote_catalog(packet_text)
+        context_options = {'compact': True} if efficient else {}
         rag_context = await build_cv_skill_context(
-            packet_text, max_chars=settings.CV_RAG_CONTEXT_MAX_CHARACTERS,
+            packet_text, max_chars=settings.CV_RAG_CONTEXT_MAX_CHARACTERS, **context_options,
         )
-        system_prompt = load_prompt("cv_extraction.v2.packets-soft.v8.system.md") + "\n\n" + rag_context + (
+        prompt_file = 'cv_extraction.v2.efficient.system.md' if efficient else 'cv_extraction.v2.packets-soft.v8.system.md'
+        system_prompt = load_prompt(prompt_file) + "\n\n" + rag_context + (
             "\nTarea: extraé hechos solo de este paquete y respondé con aliases compactos, sin identidad ni habilidades rechazadas."
         )
         payload = json.dumps({
@@ -515,6 +540,7 @@ async def process_packetized_cv_text(
                     "text": packet_text,
                     "source_quotes": quote_catalog,
                     "fragment_schema": _fragment_schema(),
+                    **({'source_format': 'annotated-quotes.v1'} if efficient else {}),
                 }, ensure_ascii=False)
         try:
             for attempt in range(2):
@@ -523,8 +549,17 @@ async def process_packetized_cv_text(
                     system_prompt, payload,
                     f"cv-packet-{identity['job_id']}-{packet_id}-validation-{attempt}",
                     on_heartbeat=on_heartbeat,
+                    **({'defer_quota_waits': True} if efficient else {}),
                 )
                 provider_model = raw.pop("__provider_model", None)
+                if efficient and len(packet_text) >= 80:
+                    properties = _fragment_schema()['properties']
+                    if any(isinstance(rows, list) and len(rows) > properties.get(alias, {}).get('maxItems', float('inf'))
+                           for alias, rows in raw.items()):
+                        # A larger packet can contain more facts than the wire
+                        # contract allows. Split before paying to request the
+                        # same impossible-sized response a second time.
+                        raise ProviderResponseTruncated('El paquete contiene más hechos que el contrato por fragmento.')
                 try:
                     resolved = _resolve_quote_ids(raw, quote_catalog)
                     _expanded, compact = validate_fragment(resolved, packet_text)
@@ -532,10 +567,14 @@ async def process_packetized_cv_text(
                 except ValueError as validation_error:
                     if attempt:
                         if resolved is None:
+                            if efficient:
+                                raise CVProfileValidationError() from validation_error
                             raise
                         try:
                             _expanded, compact, dropped = salvage_fragment(resolved, packet_text)
                         except ValueError:
+                            if efficient:
+                                raise CVProfileValidationError() from validation_error
                             raise validation_error
                         logger.warning("CV packet retained grounded facts after validation retry: dropped=%s", dropped)
                         break
@@ -557,7 +596,9 @@ async def process_packetized_cv_text(
             if isinstance(exc, ProviderInputLimitExceeded):
                 fixed_payload = json.loads(payload)
                 fixed_payload.update(text="", source_quotes={})
-                overhead = estimate_input_tokens(system_prompt + json.dumps(fixed_payload, ensure_ascii=False))
+                overhead = (prepare_gemini_input(system_prompt, json.dumps(fixed_payload, ensure_ascii=False))[2]
+                            if identity.get('provider') == 'gemini' else
+                            estimate_input_tokens(system_prompt + json.dumps(fixed_payload, ensure_ascii=False)))
                 # Shrinking the CV cannot remove instructions, schema or RAG.
                 # Do not recursively split to 40 chars and report an output error.
                 if overhead >= exc.limit_tokens or len(packet_text) < 80:
@@ -597,7 +638,7 @@ async def process_packetized_cv_text(
     facts = compact_facts_for_plan(fragments)
     logger.info("CV packet extraction ready packets=%d facts=%s", len(leaves), {key: len(value) for key, value in facts.items()})
 
-    plan_raw = _single_fragment_plan(fragments, facts)
+    plan_raw = local_consolidation_plan(fragments) if efficient else _single_fragment_plan(fragments, facts)
     provider_model = None
     if plan_raw is None:
         plan_raw = await call_provider(
@@ -613,12 +654,18 @@ async def process_packetized_cv_text(
         )
         provider_model = plan_raw.pop("__provider_model", None)
     else:
-        logger.info("CV consolidation completed locally packets=1")
-    profile, effective_plan = validate_and_build_profile_with_effective_plan(plan_raw, fragments, candidate_id)
+        logger.info("CV consolidation completed locally packets=%d", len(leaves))
+    try:
+        profile, effective_plan = validate_and_build_profile_with_effective_plan(plan_raw, fragments, candidate_id)
+    except ValueError as exc:
+        if not efficient:
+            raise
+        raise CVProfileValidationError() from exc
     if not profile.get("summary"):
         profile["summary"] = _fragment_summary(fragments)
     try:
-        profile = validate_expanded_profile(profile, text, candidate_id)
+        profile = validate_expanded_profile(profile, text, candidate_id,
+                                             **({'preserve_skill_groups': True} if efficient else {}))
     except ValueError as exc:
         logger.error("CV final validation failed type=%s packets=%d", type(exc).__name__, len(leaves))
         raise CVProfileValidationError() from exc

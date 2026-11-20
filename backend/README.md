@@ -11,7 +11,7 @@ cliente. El límite actual es 20 páginas PDF, 50 MiB descomprimidos para Office
 y 100.000 caracteres de texto. No se trunca contenido. El OCR queda fuera de
 alcance.
 
-El análisis del CV usa `cv-extraction.v2-packets-soft.v13-education` y mantiene el perfil ampliado
+El análisis del CV usa `cv-extraction.v2-packets-soft.v14-efficient` y mantiene el perfil ampliado
 `candidate-profile.v2`. Divide el texto en paquetes de hasta
 `CV_PACKET_CHARACTERS` (500 por defecto, limitado por `CV_BLOQUE_CARACTERES`).
 Cada llamada utiliza `CV_EXTRACTION_MAX_TOKENS` (950 por defecto). Si una salida
@@ -24,8 +24,18 @@ propio identificador, rango y hash; un checkpoint de otro trabajo se rechaza.
 Los resultados se validan contra el subtexto de su paquete antes de guardarlos.
 Los paquetes terminados se reutilizan al reanudar, sin enviarlos otra vez.
 
-La consolidación con IA devuelve grupos de identificadores; el servidor conserva
-las evidencias ya extraídas. Solo se publica el perfil cuando están completas
+Con Gemini, el perfil v14 envía el texto una sola vez con citas anotadas `qN`,
+usa el esquema nativo sin repetirlo en el texto y consolida localmente, sin
+una llamada de IA final. Las reglas de evidencia, niveles y taxonomía se
+conservan en un prompt compacto; el RAG adicional se limita a fichas relevantes
+de hasta 2000 caracteres. Identidades parciales o contradictorias quedan
+separadas. Los registros respetan los límites de evidencia sin perder citas:
+un CV extenso puede conservar varios registros de una misma categoría cuando
+su unión excedería esos límites. No se modifican los contratos públicos.
+
+Groq/OpenAI y los trabajos anteriores conservan su consolidación con IA, que
+devuelve grupos de identificadores. El servidor conserva las evidencias ya
+extraídas. Solo se publica el perfil cuando están completas
 todas las hojas y su cobertura corresponde al texto íntegro del mismo CV.
 Si un grupo propuesto combina hechos incompatibles, se conservan como hechos
 individuales después de validar que todos los identificadores estén presentes
@@ -250,11 +260,20 @@ en evidencia. Un fragmento inválido admite un único reintento de corrección.
 
 Los CV se procesan de a uno mediante un lease global Redis, con concurrencia y
 prefetch uno en Celery. La reserva atómica controla RPM, TPM de entrada estimados
-y RPD; la ventana diaria local es móvil de 24 horas. Las esperas diarias liberan
-el worker y reprograman el trabajo. Una hoja válida sin posibles duplicados se
-ensambla en código; múltiples hojas o ambigüedad conservan consolidación LLM.
+y RPD; la ventana diaria local es móvil de 24 horas. En v14 Gemini todas las
+esperas por cuota liberan el worker y reprograman el trabajo, sin repetir hojas
+guardadas. Las reservas de entrada se reconcilian con `promptTokenCount` cuando
+está disponible; no se reinician RPM/RPD, marcas temporales ni esperas de 429.
+Una respuesta ya recibida no falla por un error del registro de cuotas.
+La consolidación v14 se ensambla en código para cualquier cantidad de hojas;
+el flujo anterior mantiene consolidación LLM para múltiples hojas o ambigüedad.
 Se divide antes de llamar si la entrada supera su presupuesto, o después si la
 salida queda truncada. Los callbacks reciben prioridad para entregar resultados.
+
+La comparación reproducible, sin llamadas a IA ni a Redis, está en
+`python -B scripts/benchmark_cv_budget.py`. Mide estimaciones de entrada con
+texto sintético: no mide tokens facturados, calidad de extracción ni latencia
+real. Detalles y resultados en `docs/changes/002-cv-token-efficiency.md`.
 
 `MATCH_PROVIDER` es independiente de `LLM_PROVIDER`: en esta configuración Gemini
 extrae CV y Groq evalúa compatibilidad. Configurá `GROQ_API_KEY` en el `.env`

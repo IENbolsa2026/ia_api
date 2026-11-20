@@ -68,6 +68,15 @@ class GeminiPacketInputTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GeminiDailyDeferralTests(unittest.IsolatedAsyncioTestCase):
+    async def test_efficient_short_quota_wait_yields_worker_instead_of_sleeping(self):
+        error = RateLimitExceeded(45, reason='token_headroom')
+        with patch('app.services.cv_pipeline._call_async', new_callable=AsyncMock, side_effect=error) as call, \
+             patch('app.services.cv_pipeline.asyncio.sleep', new_callable=AsyncMock) as sleep:
+            with self.assertRaises(RateLimitExceeded):
+                await _call_cv_provider('system', 'data', 'synthetic', defer_quota_waits=True)
+        call.assert_awaited_once()
+        sleep.assert_not_awaited()
+
     async def test_daily_budget_yields_worker_without_sleeping_or_calling_again(self):
         error = RateLimitExceeded(86400, reason='daily_budget')
         with patch('app.services.cv_pipeline._call_async', new_callable=AsyncMock, side_effect=error) as call, \

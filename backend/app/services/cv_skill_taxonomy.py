@@ -157,7 +157,8 @@ def _training_only_in_source(quotes: list[str], source_text: str) -> bool:
     return True
 
 
-def normalize_expanded_skills(skills: list[dict[str, Any]], *, source_text: str | None = None) -> list[dict[str, Any]]:
+def normalize_expanded_skills(skills: list[dict[str, Any]], *, source_text: str | None = None,
+                              preserve_groups: bool = False) -> list[dict[str, Any]]:
     """Canonicalize exact soft aliases and safely merge duplicate concepts.
 
     Apply after source/fragment validation, then revalidate the rebuilt compact
@@ -210,6 +211,23 @@ def normalize_expanded_skills(skills: list[dict[str, Any]], *, source_text: str 
             result.append(row)
             continue
         previous = result[positions[canonical_concept]]
+        if preserve_groups:
+            # A long CV may legitimately need several bounded records for the
+            # same category. Do not discard citations or force contradictory
+            # levels into one record. Each record still passes full validation.
+            conflict = any(previous.get(field) not in (unknown, None)
+                           and row.get(field) not in (unknown, None)
+                           and previous[field] != row[field]
+                           for field, unknown in (('level', 'unknown'), ('years_experience', None)))
+            try:
+                _union_exact(previous.get('evidence', []), row.get('evidence', []))
+                _union_exact(previous.get('source_quotes', []), row.get('source_quotes', []))
+            except SkillTaxonomyError:
+                conflict = True
+            if conflict:
+                positions[canonical_concept] = len(result)
+                result.append(row)
+                continue
         for field, unknown in (('level', 'unknown'), ('years_experience', None)):
             old, new = previous.get(field, unknown), row.get(field, unknown)
             if old not in (unknown, None) and new not in (unknown, None) and old != new:

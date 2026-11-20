@@ -117,6 +117,52 @@ def compact_facts_for_plan(fragments: list[dict[str, Any]]) -> dict[str, Any]:
     return payload
 
 
+def local_consolidation_plan(fragments: list[dict[str, Any]]) -> dict[str, Any]:
+    """Lossless conservative grouping without a provider request, for any size CV.
+
+    Unknown identity components do not establish that two jobs, studies or
+    credentials describe the same entity. Conflicts and evidence bounds keep
+    records separate; final coverage validation remains authoritative.
+    """
+    facts, _preferences = _collect_facts(fragments)
+    identity_fields = {
+        'sk': ('n', 'ci'), 'x': ('t', 'o'), 'pr': ('n',),
+        'ed': ('l', 'f', 'i', 'c', 'st'), 'l': ('n',), 'c': ('n', 'i', 'd', 'x'),
+    }
+    plan = {'h': next((fragment['h'] for fragment in fragments if fragment.get('h')), None), 's': None}
+    for alias, (section, _fields) in SECTIONS.items():
+        rows = facts[section]
+        buckets: dict[tuple, list[list[str]]] = {}
+        groups = []
+        for item_id, row in rows.items():
+            key = tuple(_normalize(row.get(field)) for field in identity_fields[alias])
+            if alias in {'x', 'ed', 'c'} and any(row.get(field) in (None, 'unknown', '')
+                                                for field in identity_fields[alias][:2]):
+                # Exact duplicate rows are safe even when their identity is partial.
+                key = ('exact', repr(sorted(row.items())))
+            options = buckets.setdefault(key, [])
+            for group in options:
+                candidates = [rows[member] for member in [*group, item_id]]
+                try:
+                    if alias in {'sk', 'l'}:
+                        for field in ('k', 'l', 'y', 'ci') if alias == 'sk' else ('l',):
+                            _reject_conflicts(candidates, field, field,
+                                              unknown_values={None, 'unknown'}, incompatible=True)
+                    elif alias == 'x':
+                        _reject_conflicts(candidates, 'm', 'duration', incompatible=True)
+                    _merge_one(candidates, section)
+                except IncompatibleFactGroup:
+                    continue
+                group.append(item_id)
+                break
+            else:
+                group = [item_id]
+                options.append(group)
+                groups.append(group)
+        plan[alias] = groups
+    return plan
+
+
 def _collect_facts(fragments: list[dict[str, Any]]) -> tuple[dict[str, dict[str, dict]], dict[str, list]]:
     facts: dict[str, dict[str, dict]] = {
         "skills": {}, "work_experience": {}, "projects": {}, "education": {}, "languages": {}, "credentials": {},

@@ -21,7 +21,10 @@ from ien_contracts.models import CandidateProfile, JobOffer, Requirement
 
 from app.core.config import settings
 from app.services.cv_compact_contract import validate_expanded_profile, validate_fragment
-from app.services.cv_packets import PacketsIdentityError, make_packet_identity, process_packetized_cv_text
+from app.services.cv_packets import (
+    CV_EFFICIENT_PROMPT_VERSION, PacketsIdentityError, checkpoint_prompt_version,
+    make_packet_identity, process_packetized_cv_text,
+)
 from app.services.skill_context import load_skill_instruction
 from app.services.rate_limiter import (
     ProviderOutputLimitExceeded,
@@ -32,7 +35,7 @@ from app.services.rate_limiter import (
     retry_after_seconds,
 )
 
-CV_EXTRACTION_PROMPT_VERSION = "cv-extraction.v2-packets-soft.v13-education"
+CV_EXTRACTION_PROMPT_VERSION = CV_EFFICIENT_PROMPT_VERSION
 OFFER_EXTRACTION_PROMPT_VERSION = "offer-extraction.v2"
 PROFILE_NORMALIZATION_PROMPT_VERSION = "profile-normalization.v2"
 
@@ -205,6 +208,7 @@ async def _call_cv_provider(
     marker: str,
     *,
     on_heartbeat=None,
+    defer_quota_waits: bool = False,
 ) -> dict[str, Any]:
     """Rate-limit waits for CV stay within this task and preserve prior blocks in memory."""
     consecutive_waits = 0
@@ -229,7 +233,7 @@ async def _call_cv_provider(
                 max_output_tokens=settings.CV_EXTRACTION_MAX_TOKENS,
             )
         except RateLimitExceeded as exc:
-            if exc.reason == "daily_budget" or exc.retry_after_seconds > 120:
+            if defer_quota_waits or exc.reason == "daily_budget" or exc.retry_after_seconds > 120:
                 # Defer the task instead of occupying the sole worker for hours.
                 raise
             if not exc.is_local_wait:
@@ -266,7 +270,7 @@ async def process_cv_text(
         cv_version_id=external.get("cv_version_id"),
         source_hash=source_hash,
         text=text,
-        prompt_version=CV_EXTRACTION_PROMPT_VERSION,
+        prompt_version=checkpoint_prompt_version(checkpoint),
         provider=settings.LLM_PROVIDER,
         model=(settings.GEMINI_MODEL if settings.LLM_PROVIDER.strip().lower() == "gemini" else
                settings.OPENAI_MODEL if settings.LLM_PROVIDER.strip().lower() == "openai" else settings.CV_MODEL),

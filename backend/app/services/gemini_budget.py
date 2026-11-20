@@ -91,6 +91,17 @@ return {1, 0, 0}
 """
 
 
+LUA_RECONCILE_GEMINI = r"""
+-- Do not resurrect expired reservations or renew their window.
+if redis.call('ZSCORE', KEYS[1], ARGV[1]) and
+   redis.call('HEXISTS', KEYS[2], ARGV[1]) == 1 then
+  redis.call('HSET', KEYS[2], ARGV[1], ARGV[2])
+  return 1
+end
+return 0
+"""
+
+
 def estimate_input_tokens(text: str) -> int:
     """Estimate input tokens conservatively as ceil(characters / 2)."""
     return math.ceil(len(text) / 2)
@@ -106,7 +117,7 @@ class GeminiBudgetLimiter:
         rpm: int,
         tpm: int,
         rpd: int,
-        max_input_tokens: int = 12000,
+        max_input_tokens: int = 20000,
     ) -> None:
         # ``scope`` should match RedisRateLimiter's cooldown_scope, e.g. a
         # provider/key/model fingerprint, so provider 429 cooldowns are shared.
@@ -120,6 +131,7 @@ class GeminiBudgetLimiter:
         self.tpm = max(1, int(tpm))
         self.rpd = max(1, int(rpd))
         self.max_input_tokens = max(1, int(max_input_tokens))
+        self._reservation_id: str | None = None
 
     def reserve(self, marker: str, input_tokens: int) -> None:
         """Atomically reserve one request and its estimated input tokens.
@@ -155,3 +167,16 @@ class GeminiBudgetLimiter:
                 4: 'cooldown',
             }.get(int(reason_code), 'rpm')
             raise RateLimitExceeded(max(0.001, float(wait_ms) / 1000), reason=reason)
+        self._reservation_id = member
+
+    def record_usage(self, input_tokens: int | None) -> None:
+        """Reconcile only this admitted request with provider-reported input.
+
+        RPM, daily request counts and original timestamps are unchanged. Missing
+        or invalid usage keeps the conservative reservation. Redis failures are
+        handled by the caller so an already billed response is never repeated.
+        """
+        if self._reservation_id is None or type(input_tokens) is not int or input_tokens <= 0:
+            return
+        self.client.eval(LUA_RECONCILE_GEMINI, 2, self.minute_key, self.tokens_key,
+                         self._reservation_id, input_tokens)

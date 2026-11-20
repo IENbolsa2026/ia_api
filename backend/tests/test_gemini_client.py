@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import redis
 
 from app.core.config import Settings, settings
 from app.services.cv_pipeline import _call_provider, process_cv_text
@@ -98,7 +99,15 @@ class GeminiClientTests(unittest.TestCase):
                 config = sent['generationConfig']
                 self.assertEqual(config['responseMimeType'], 'application/json')
                 self.assertEqual(config['thinkingConfig'], {'thinkingLevel': 'minimal'})
-                self.assertEqual(sent['contents'][0]['parts'][0]['text'], serialized)
+                if expected is None:
+                    self.assertEqual(sent['contents'][0]['parts'][0]['text'], serialized)
+                else:
+                    sent_payload = json.loads(sent['contents'][0]['parts'][0]['text'])
+                    expected_payload = {key: value for key, value in payload.items()
+                                        if key not in {'fragment_schema', 'plan_schema'}}
+                    self.assertEqual(sent_payload, expected_payload)
+                    self.assertNotIn('fragment_schema', sent_payload)
+                    self.assertNotIn('plan_schema', sent_payload)
                 if expected is None:
                     self.assertNotIn('responseJsonSchema', config)
                 else:
@@ -119,6 +128,21 @@ class GeminiClientTests(unittest.TestCase):
         self.post.return_value = httpx.Response(200, json=reply({'apparently': 'valid'}, finish='MAX_TOKENS'))
         with self.assertRaises(ProviderResponseTruncated):
             generate_json('system', 'user', 'synthetic')
+
+    def test_successful_billed_response_survives_quota_bookkeeping_outage_without_another_http_call(self):
+        self.limiter.record_response.side_effect = redis.ConnectionError('Synthetic bookkeeping outage')
+        self.limiter.record_usage.side_effect = redis.ConnectionError('Synthetic reconciliation outage')
+        self.post.return_value = httpx.Response(200, json=reply({'ok': True}, usageMetadata={'promptTokenCount': 120}))
+        with self.assertLogs('app.services.gemini_client', level='WARNING'):
+            result = generate_json('private system', 'private source', 'synthetic')
+        self.assertEqual(result['content'], {'ok': True})
+        self.assertEqual(self.post.call_count, 1)
+
+    def test_truncated_output_still_reconciles_input_already_consumed(self):
+        self.post.return_value = httpx.Response(200, json=reply(finish='MAX_TOKENS', usageMetadata={'promptTokenCount': 731}))
+        with self.assertRaises(ProviderResponseTruncated):
+            generate_json('system', 'source', 'synthetic')
+        self.limiter.record_usage.assert_called_once_with(731)
 
     def test_invalid_blocked_or_missing_json_is_sanitized(self):
         bodies = [

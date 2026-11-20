@@ -12,8 +12,11 @@ from celery.exceptions import Retry
 
 from app.core.celery_app import celery_app
 from app.core.config import settings
-from app.services.cv_pipeline import CV_EXTRACTION_PROMPT_VERSION, normalize_candidate_profile, process_cv_text, process_offer_snapshot
-from app.services.cv_packets import CVProfileValidationError, PacketsIdentityError, count_completed_packets, make_packet_identity
+from app.services.cv_pipeline import normalize_candidate_profile, process_cv_text, process_offer_snapshot
+from app.services.cv_packets import (
+    CVProfileValidationError, PacketsIdentityError, checkpoint_prompt_version,
+    count_completed_packets, make_packet_identity,
+)
 from app.services.job_store import ExtractionJobStore, LockOwnershipLost
 from app.services.document_text import DocumentRejected
 from app.services.cv_artifacts import artifact_path, delete_artifact
@@ -170,7 +173,7 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
                 cv_version_id=payload.get("cv_version_id"),
                 source_hash=payload["source_hash"],
                 text=text,
-                prompt_version=CV_EXTRACTION_PROMPT_VERSION,
+                prompt_version=checkpoint_prompt_version(packet_checkpoint),
                 provider=provider,
                 model=configured_model,
                 packet_chars=settings.CV_PACKET_CHARACTERS,
