@@ -151,15 +151,15 @@ def retain_explicit_courses(education: list[dict], source_text: str) -> list[dic
             continue
         if len(rows) >= 20:
             break
-        rows.append({'level': 'other', 'field': title, 'institution': None,
-                     'completed': None, 'completion_status': 'unknown', 'source_quotes': [quote]})
+        _append_grounded_study(rows, {'level': 'other', 'field': title, 'institution': None,
+                               'completed': None, 'completion_status': 'unknown', 'source_quotes': [quote]}, source_text)
     return rows
 
 
 _ACADEMIC_LINE = re.compile(
     r'^(?:[•*\-]\s*)?(?P<program>'
     r'(?P<level>doctorado|maestr[ií]a|licenciatura|ingenier[ií]a|'
-    r'tecnicatura|profesorado|secundari[oa]|bachillerato)'
+    r'tecnicatura|profesorado|educaci[oó]n\s+secundari[oa]|secundari[oa]|bachillerato)'
     r'(?:\s+(?:en|de|del)\s+[^,;:()]+?)?)'
     r'(?=\s*(?:[,;:()]|\s*[-–]\s*|\s*$|\b(?:completad\w*|finalizad\w*|'
     r'terminad\w*|cursando|en curso|incomplet\w*|graduad\w*|complet[oa])\b))', re.I,
@@ -170,6 +170,7 @@ _ACADEMIC_LEVELS = {
     'tecnicatura': 'technical', 'profesorado': 'other',
     'secundario': 'secondary', 'secundaria': 'secondary',
     'bachillerato': 'secondary',
+    'educacion secundaria': 'secondary', 'educacion secundario': 'secondary',
 }
 _EDUCATION_HEADING = re.compile(
     r'^(?:educacion|formacion(?: academica| profesional)?|estudios)(?: y capacitacion)?\s*:?(?:\s*)$', re.I,
@@ -183,6 +184,30 @@ _NON_PROGRAM = re.compile(
     r'^(?:curso|taller|seminario|universidad|instituto|escuela|colegio|facultad|'
     r'finalizad\w*|completad\w*|en curso|actualidad|\d)', re.I,
 )
+
+
+def _append_grounded_study(rows: list[dict], candidate: dict, source_text: str) -> None:
+    """Recovery may add facts, never invalidate already grounded provider facts."""
+    try:
+        grounded = ground_education([candidate], source_text)[0]
+    except ValueError:
+        return
+    rows.append(grounded)
+
+
+def _unlabeled_program(line: str, previous: str, rows: list[dict]) -> bool:
+    """Conservatively recover vocational titles, not wrapped institutions/names."""
+    normalized = _normalize(line)
+    if (_NON_PROGRAM.match(normalized) or line.endswith((':', '.'))
+            or re.search(r'@|https?://|www\.|\([A-ZÁÉÍÓÚÑ]{2,}\)', line)):
+        return False
+    if re.match(r'^(?:universidad|instituto|escuela|colegio|facultad)\b', _normalize(previous)):
+        return False
+    # Proper-name continuations are not evidence of a course or degree.
+    significant = [word for word in re.findall(r'[^\W\d_]+', line) if _normalize(word) not in _STOP_WORDS]
+    if not any(word.islower() for word in significant):
+        return False
+    return not any(normalized in _normalize(' '.join(row.get('source_quotes', []))) for row in rows)
 
 
 def retain_explicit_academic_education(education: list[dict], source_text: str) -> list[dict]:
@@ -215,9 +240,7 @@ def retain_explicit_academic_education(education: list[dict], source_text: str) 
         previous_is_course = index > 0 and bool(re.match(r'^(?:curso|taller|seminario)\b', lines[index - 1], re.I))
         if not match and not (in_education and not previous_is_course and 8 <= len(line) <= 100
                               and 2 <= len(line.split()) <= 10
-                              and not _NON_PROGRAM.match(normalized_line)
-                              and not line.endswith(':')
-                              and not re.search(r'\b(?:@|https?://|www\.)', line, re.I)):
+                              and _unlabeled_program(line, lines[index - 1] if index else '', rows)):
             continue
         quote = continuation if match and continuation else line
         program = ' '.join(match.group('program').split()) if match else line.strip(' •*-–')
@@ -239,13 +262,13 @@ def retain_explicit_academic_education(education: list[dict], source_text: str) 
         field = program[len(match.group('level')):].strip() if match and level != 'other' else program
         field = re.sub(r'^(?:en|de|del)\s+', '', field, flags=re.I).strip() or None
         if any((field and _tokens(field) <= _tokens(row.get('field') or ''))
-               or (not field and row.get('level') == level and not row.get('field'))
+               or (not field and row.get('level') == level)
                for row in rows):
             continue
         if len(rows) >= 20:
             break
-        rows.append({'level': level, 'field': field, 'institution': None,
-                     'completed': None, 'completion_status': 'unknown', 'source_quotes': [quote]})
+        _append_grounded_study(rows, {'level': level, 'field': field, 'institution': None,
+                               'completed': None, 'completion_status': 'unknown', 'source_quotes': [quote]}, source_text)
     return rows
 
 

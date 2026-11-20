@@ -86,6 +86,23 @@ class ProviderResponseTruncated(ValueError):
     """El proveedor terminó una respuesta JSON antes de completarla."""
 
 
+class ProviderInputLimitExceeded(ValueError):
+    """Local input budget exceeded, before any provider request or reservation."""
+
+    def __init__(self, estimated_tokens: int, limit_tokens: int) -> None:
+        self.estimated_tokens = estimated_tokens
+        self.limit_tokens = limit_tokens
+        super().__init__(estimated_tokens, limit_tokens)
+
+    def __str__(self) -> str:
+        return (
+            f"La entrada del análisis requiere aproximadamente {self.estimated_tokens} tokens "
+            f"y el presupuesto configurado permite {self.limit_tokens}. "
+            "Revisá GEMINI_MAX_INPUT_TOKENS_PER_REQUEST y GEMINI_INPUT_TOKENS_PER_MINUTE "
+            "según la cuota del proveedor."
+        )
+
+
 def retry_after_seconds(value: str | None, default: int = 60) -> float:
     """Interpreta Retry-After (segundos o fecha HTTP) y limita valores extremos."""
     if value:

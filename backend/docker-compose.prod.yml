@@ -12,7 +12,7 @@ x-app: &app
     CELERY_BROKER_URL: redis://redis:6379/0
     CELERY_RESULT_BACKEND: redis://redis:6379/1
     JOB_STORE_REDIS_URL: redis://redis:6379/2
-    CHANNEL_REDIS_URL: ${CHANNEL_REDIS_URL:-redis://redis:6379/3}
+    CHANNEL_REDIS_URL: ${DOCKER_CHANNEL_REDIS_URL:-redis://redis:6379/3}
     MATCH_REDIS_URL: redis://redis:6379/4
   volumes:
     - cv_artifacts:/app/private_cv_artifacts

@@ -39,7 +39,7 @@ class Settings(BaseSettings, extra="ignore"):
     GEMINI_MAX_OUTPUT_TOKENS: int = Field(default=8192, ge=1)
     GEMINI_INPUT_TOKENS_PER_MINUTE: int = Field(default=20000, ge=1000)
     GEMINI_REQUESTS_PER_DAY: int = Field(default=20, ge=1)
-    GEMINI_MAX_INPUT_TOKENS_PER_REQUEST: int = Field(default=12000, ge=1000)
+    GEMINI_MAX_INPUT_TOKENS_PER_REQUEST: int = Field(default=20000, ge=1000)
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_MAX_OUTPUT_TOKENS: int = 6000

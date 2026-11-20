@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from app.services.cv_packets import (
-    PacketsIdentityError, _single_fragment_plan, make_packet_identity,
+    CVProfileValidationError, PacketsIdentityError, _single_fragment_plan, make_packet_identity,
     process_packetized_cv_text, validate_manifest,
 )
 from app.services.cv_consolidation import compact_facts_for_plan
@@ -81,6 +81,16 @@ class SingleLeafFastPathTests(unittest.IsolatedAsyncioTestCase):
                 on_checkpoint=snapshots.append, on_heartbeat=None, call_provider=provider,
             )
         return result, snapshots
+
+    async def test_final_local_validation_failure_has_permanent_safe_error(self):
+        async def provider(*_args, **_kwargs):
+            return fragment()
+
+        with patch('app.services.cv_packets.validate_expanded_profile',
+                   side_effect=ValueError('private CV data sentinel')):
+            with self.assertRaises(CVProfileValidationError) as raised:
+                await self.run_pipeline(provider)
+        self.assertNotIn('private CV', str(raised.exception))
 
     async def test_one_valid_leaf_skips_consolidation_and_checkpoint_rebuild_preserves_summary(self):
         calls = []

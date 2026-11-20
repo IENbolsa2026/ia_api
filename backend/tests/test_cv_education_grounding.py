@@ -160,6 +160,40 @@ class ExplicitCourseTests(unittest.TestCase):
 
 
 class ExplicitEducationRecoveryTests(unittest.TestCase):
+    def test_wrapped_institutions_and_adjacent_skills_do_not_invent_studies(self):
+        from app.services.cv_compact_contract import validate_expanded_profile
+
+        source = ('EDUCACIÓN\nInstituto Educativo Regional\nNacional (IER).\n'
+                  'Tecnicatura en Desarrollo de\nSoftware (En curso).\n'
+                  'Colegio Secundario UEP N° 99 Pensamiento analítico y resolución de\n'
+                  'José Manuel Ejemplo.\nEducación Secundaria Completa. Comunicación y articulación técnica\n'
+                  'HABILIDADES\nTrabajo en equipo')
+        education = [
+            {'level': 'technical', 'field': 'Tecnicatura en Desarrollo de Software',
+             'source_quotes': ['Instituto Educativo Regional', 'Nacional (IER).',
+                               'Tecnicatura en Desarrollo de', 'Software (En curso).']},
+            {'level': 'secondary', 'field': 'Educación Secundaria',
+             'source_quotes': ['Colegio Secundario UEP N° 99 Pensamiento analítico y resolución de',
+                               'José Manuel Ejemplo.', 'Educación Secundaria Completa.']},
+        ]
+        profile = {'schema_version': 'candidate-profile.v2', 'profile_id': '42',
+                   'skills': [], 'work_experience': [], 'education': education,
+                   'languages': [], 'preferences': {'locations': [], 'work_modes': []},
+                   'credentials': [], 'rejected_skills': []}
+        result = validate_expanded_profile(profile, source, 42)
+        self.assertEqual(len(result['education']), 2)
+        self.assertEqual([row['completion_status'] for row in result['education']], ['in_progress', 'completed'])
+        self.assertEqual([row['completed'] for row in result['education']], [False, True])
+        recovered = ground_education(retain_explicit_academic_education([], source), source)
+        self.assertEqual([row['level'] for row in recovered], ['technical', 'secondary'])
+        self.assertEqual([row['completion_status'] for row in recovered], ['in_progress', 'completed'])
+
+    def test_invalid_recovery_never_poison_existing_studies(self):
+        source = 'EDUCACIÓN\nSecundario completo\nComunicación. Articulación técnica\n'
+        rows = retain_explicit_academic_education([], source)
+        self.assertEqual([row['level'] for row in rows], ['secondary'])
+        self.assertTrue(ground_education(rows, source)[0]['completed'])
+
     def test_omitted_vocational_training_is_recovered_only_from_education_section(self):
         source = ('FORMACIÓN ACADÉMICA\nPiloto comercial\nEscuela de aviación\n'
                   'EXPERIENCIA LABORAL\nVendedor de mostrador')

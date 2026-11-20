@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app.services.rate_limiter import ProviderOutputLimitExceeded, ProviderResponseTruncated
+from app.services.rate_limiter import ProviderInputLimitExceeded, ProviderOutputLimitExceeded, ProviderResponseTruncated
+from app.services.cv_packets import CVProfileValidationError
 from app.tasks.cv_analysis_tasks import deliver_extraction_result_task, run_extraction_task
 
 
@@ -34,6 +35,35 @@ class InMemoryExtractionStore:
 
 
 class ProviderOutputTerminalTests(unittest.TestCase):
+    def test_local_input_and_final_validation_failures_are_delivered_without_provider_retry(self):
+        for error in (ProviderInputLimitExceeded(13000, 12000), CVProfileValidationError()):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as directory:
+                source = b'Synthetic resume'
+                artifact = Path(directory) / 'resume.txt'
+                artifact.write_bytes(source)
+                job = {'job_id': 'local-failure', 'idempotency_key': 'local-failure',
+                       'status': 'accepted', 'result': None, 'error': None,
+                       'payload': {'kind': 'candidate_cv', 'analysis_id': 22, 'candidate_id': 4,
+                                   'user_id': None, 'source_hash': hashlib.sha256(source).hexdigest(),
+                                   'artifact_id': 'artifact-local', 'format': 'txt'}}
+                store = InMemoryExtractionStore(job)
+                with patch('app.tasks.cv_analysis_tasks.ExtractionJobStore', return_value=store), \
+                     patch('app.tasks.cv_analysis_tasks.artifact_path', return_value=artifact), \
+                     patch('app.tasks.cv_analysis_tasks.extract_in_subprocess', return_value=source.decode()), \
+                     patch('app.tasks.cv_analysis_tasks.process_cv_text', new_callable=AsyncMock, side_effect=error), \
+                     patch('app.tasks.cv_analysis_tasks.delete_artifact') as delete, \
+                     patch('app.tasks.cv_analysis_tasks.deliver_extraction_result_task.delay') as delivery, \
+                     patch.object(run_extraction_task, 'retry', side_effect=AssertionError('Permanent failure retried')):
+                    self.assertEqual(run_extraction_task.run('local-failure')['status'], 'failed')
+                self.assertEqual(job['error'], str(error))
+                delete.assert_called_once_with('artifact-local', 'txt')
+                delivery.assert_called_once_with('local-failure')
+                with patch('app.tasks.cv_analysis_tasks.ExtractionJobStore', return_value=store), \
+                     patch('app.tasks.cv_analysis_tasks.notify_extraction_result') as notify:
+                    self.assertEqual(deliver_extraction_result_task.run('local-failure')['status'], 'delivered')
+                self.assertEqual(notify.call_args.args[0]['status'], 'failed')
+                self.assertEqual(notify.call_args.args[0]['error'], str(error))
+
     def test_cv_output_overflow_is_failed_delivered_and_artifact_removed_without_retry(self):
         source = b"Synthetic resume"
         job = {

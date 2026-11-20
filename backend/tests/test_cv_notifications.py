@@ -20,6 +20,21 @@ class CVNotificationTaskTests(unittest.TestCase):
         })
         layer.close_pools.assert_awaited_once()
 
+    def test_unavailable_notification_redis_does_not_undo_confirmed_callback(self):
+        with patch('app.tasks.cv_analysis_tasks.ExtractionJobStore') as store, \
+             patch('app.tasks.cv_analysis_tasks.notify_extraction_result') as notify, \
+             patch('app.services.channel_events.RedisChannelLayer') as layer_type, \
+             patch.object(deliver_extraction_result_task, 'retry', side_effect=AssertionError('Callback must not repeat')):
+            store.return_value.get.return_value = self.deliver()
+            layer = layer_type.return_value
+            layer.group_send = AsyncMock(side_effect=ConnectionError('Synthetic Redis outage'))
+            layer.close_pools = AsyncMock()
+            with self.assertLogs('app.services.channel_events', level='ERROR'):
+                result = deliver_extraction_result_task.run('job-1')
+            self.assertEqual(result['status'], 'delivered')
+            notify.assert_called_once()
+            layer.close_pools.assert_awaited_once()
+
     def deliver(self, user_id=9, result=None):
         job = {'job_id': 'job-1', 'idempotency_key': 'cv-1', 'status': 'completed',
                'result': result if result is not None else {}, 'error': None,

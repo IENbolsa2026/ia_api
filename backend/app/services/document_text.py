@@ -204,9 +204,6 @@ def _pdf_column_break(page) -> float | None:
         return None
     x0, _top, x1, _bottom = page.bbox
     width = x1 - x0
-    rows: dict[int, list[dict]] = {}
-    for word in words:
-        rows.setdefault(round(word["top"] / 4), []).append(word)
     candidates = []
     for step in range(61):
         split = x0 + width * (0.38 + step * 0.004)
@@ -217,15 +214,29 @@ def _pdf_column_break(page) -> float | None:
         right_count = len(words) - left_count
         if min(left_count, right_count) < 25:
             continue
-        simultaneous = 0
-        for row in rows.values():
-            left_edges = [word["x1"] for word in row if word["x1"] <= split]
-            right_edges = [word["x0"] for word in row if word["x0"] >= split]
-            if left_edges and right_edges and min(right_edges) - max(left_edges) >= 24:
-                simultaneous += 1
-        if simultaneous >= max(8, len(rows) // 5):
+        # Independent columns rarely share exactly the same baseline. Count
+        # nearby lines instead of placing both sides in the same 4pt bucket.
+        left_rows = _word_rows([word for word in words if word["x1"] <= split])
+        right_rows = _word_rows([word for word in words if word["x0"] >= split])
+        simultaneous = sum(
+            any(abs(left[0]["top"] - right[0]["top"]) <= 6
+                and min(word["x0"] for word in right) - max(word["x1"] for word in left) >= 24
+                for right in right_rows)
+            for left in left_rows
+        )
+        if simultaneous >= max(8, min(len(left_rows), len(right_rows)) // 5):
             candidates.append((simultaneous, -abs(split - (x0 + x1) / 2), split))
     return max(candidates)[2] if candidates else None
+
+
+def _word_rows(words: list[dict]) -> list[list[dict]]:
+    rows: list[list[dict]] = []
+    for word in sorted(words, key=lambda item: item["top"]):
+        if not rows or word["top"] - rows[-1][0]["top"] > 3:
+            rows.append([word])
+        else:
+            rows[-1].append(word)
+    return rows
 
 
 def _extract_office(data: bytes, document_format: str) -> str:

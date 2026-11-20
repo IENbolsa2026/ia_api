@@ -19,7 +19,8 @@ from app.services.cv_consolidation import (
 from app.core.config import settings
 from app.services.skill_context import build_cv_skill_context
 from app.services.prompt_loader import load_prompt
-from app.services.rate_limiter import ProviderResponseTruncated
+from app.services.gemini_budget import estimate_input_tokens
+from app.services.rate_limiter import ProviderInputLimitExceeded, ProviderResponseTruncated
 
 
 PACKET_MANIFEST_VERSION = "cv-packets.v2"
@@ -32,6 +33,13 @@ class PacketsIdentityError(ValueError):
 
     def __init__(self) -> None:
         super().__init__("El progreso guardado del CV no coincide con este análisis. Iniciá un análisis nuevo.")
+
+
+class CVProfileValidationError(ValueError):
+    """Grounded packet facts failed final local validation; retries cannot fix it."""
+
+    def __init__(self) -> None:
+        super().__init__("No se pudo validar el contenido extraído del CV. Revisá el documento y volvé a intentarlo.")
 
 
 def _quote_catalog(text: str) -> dict[str, str]:
@@ -545,7 +553,16 @@ async def process_packetized_cv_text(
                         " ed.f debe usar palabras del programa presentes en esa misma cita, sin combinar cursos;"
                         " cada elemento de x.h debe ser breve, no vacío y de 160 caracteres o menos."
                     )
-        except ProviderResponseTruncated:
+        except (ProviderResponseTruncated, ProviderInputLimitExceeded) as exc:
+            if isinstance(exc, ProviderInputLimitExceeded):
+                fixed_payload = json.loads(payload)
+                fixed_payload.update(text="", source_quotes={})
+                overhead = estimate_input_tokens(system_prompt + json.dumps(fixed_payload, ensure_ascii=False))
+                # Shrinking the CV cannot remove instructions, schema or RAG.
+                # Do not recursively split to 40 chars and report an output error.
+                if overhead >= exc.limit_tokens or len(packet_text) < 80:
+                    logger.warning("CV input budget insufficient limit=%d fixed_tokens=%d", exc.limit_tokens, overhead)
+                    raise
             left, right = _split_text_exact(packet_text)
             middle = packet["start"] + len(left)
             left_node = _packet(identity, packet["index"], packet["path"] + "a", packet["start"], middle, text)
@@ -600,7 +617,11 @@ async def process_packetized_cv_text(
     profile, effective_plan = validate_and_build_profile_with_effective_plan(plan_raw, fragments, candidate_id)
     if not profile.get("summary"):
         profile["summary"] = _fragment_summary(fragments)
-    profile = validate_expanded_profile(profile, text, candidate_id)
+    try:
+        profile = validate_expanded_profile(profile, text, candidate_id)
+    except ValueError as exc:
+        logger.error("CV final validation failed type=%s packets=%d", type(exc).__name__, len(leaves))
+        raise CVProfileValidationError() from exc
     manifest["consolidation"] = {
         "status": "completed",
         "result": profile,

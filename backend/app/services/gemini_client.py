@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.services.gemini_cv_schema import cv_response_schema
 from app.services.gemini_budget import GeminiBudgetLimiter, estimate_input_tokens
 from app.services.rate_limiter import (
-    LUA_RECORD_RESPONSE, ProviderResponseTruncated, RateLimitExceeded, RedisRateLimiter,
+    LUA_RECORD_RESPONSE, ProviderInputLimitExceeded, ProviderResponseTruncated, RateLimitExceeded, RedisRateLimiter,
     reset_duration_seconds, retry_after_seconds,
 )
 
@@ -155,10 +155,11 @@ def generate_json(system_prompt: str, user_payload: str, marker: str,
         config['thinkingConfig'] = {'thinkingLevel': 'minimal'}
     elif model.startswith('gemini-2.5'):
         config['thinkingConfig'] = {'thinkingBudget': 0}
-    limiter = gemini_rate_limiter(model)
     estimate = estimate_input_tokens(system_prompt + user_payload)
-    if estimate > min(settings.GEMINI_MAX_INPUT_TOKENS_PER_REQUEST, settings.GEMINI_INPUT_TOKENS_PER_MINUTE):
-        raise ProviderResponseTruncated('El fragmento requiere dividirse para respetar el presupuesto de entrada.')
+    input_limit = min(settings.GEMINI_MAX_INPUT_TOKENS_PER_REQUEST, settings.GEMINI_INPUT_TOKENS_PER_MINUTE)
+    if estimate > input_limit:
+        raise ProviderInputLimitExceeded(estimate, input_limit)
+    limiter = gemini_rate_limiter(model)
     limiter.reserve(marker, estimate)
     try:
         response = httpx.post(

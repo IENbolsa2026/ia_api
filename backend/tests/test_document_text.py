@@ -23,6 +23,29 @@ def office_zip(entries):
 
 
 class DocumentTextTests(unittest.TestCase):
+    def test_pdf_columns_with_offset_baselines_and_unequal_lengths_are_separated(self):
+        words = []
+        for row in range(35):
+            words.extend({'x0': x, 'x1': x + 20, 'top': row * 14} for x in (40, 90, 140))
+        for row in range(12):
+            words.extend({'x0': x, 'x1': x + 20, 'top': row * 14 + 5} for x in (330, 380, 430))
+
+        class Page:
+            bbox = (0, 0, 600, 800)
+
+            def extract_words(self):
+                return words
+
+            def extract_text(self):
+                raise AssertionError('Columns must not be interleaved')
+
+            def crop(self, bounds):
+                return SimpleNamespace(extract_text=lambda: 'EDUCACIÓN\nSecundario completo'
+                                       if bounds[0] == 0 else 'HABILIDADES\nComunicación técnica')
+
+        self.assertEqual(_extract_pdf_page(Page()),
+                         'EDUCACIÓN\nSecundario completo\n\nHABILIDADES\nComunicación técnica')
+
     def test_pdf_side_by_side_sections_are_not_interleaved(self):
         words = []
         for row in range(12):

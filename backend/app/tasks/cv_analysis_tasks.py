@@ -13,12 +13,12 @@ from celery.exceptions import Retry
 from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.services.cv_pipeline import CV_EXTRACTION_PROMPT_VERSION, normalize_candidate_profile, process_cv_text, process_offer_snapshot
-from app.services.cv_packets import PacketsIdentityError, count_completed_packets, make_packet_identity
+from app.services.cv_packets import CVProfileValidationError, PacketsIdentityError, count_completed_packets, make_packet_identity
 from app.services.job_store import ExtractionJobStore, LockOwnershipLost
 from app.services.document_text import DocumentRejected
 from app.services.cv_artifacts import artifact_path, delete_artifact
 from app.services.document_extractor_runner import extract_in_subprocess
-from app.services.rate_limiter import ProviderOutputLimitExceeded, ProviderResponseTruncated, RateLimitExceeded
+from app.services.rate_limiter import ProviderInputLimitExceeded, ProviderOutputLimitExceeded, ProviderResponseTruncated, RateLimitExceeded
 from app.services.gemini_client import GeminiUnavailable
 from app.services.result_notifier import notify_extraction_result
 from app.services.channel_events import publish_cv_analysis_complete
@@ -285,7 +285,8 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
         permanent_cv_truncation = (
             payload.get("kind") == "candidate_cv" and isinstance(exc, ProviderResponseTruncated)
         )
-        if isinstance(exc, (DocumentRejected, ProviderOutputLimitExceeded, PacketsIdentityError)) or permanent_cv_truncation:
+        if isinstance(exc, (DocumentRejected, ProviderInputLimitExceeded, ProviderOutputLimitExceeded,
+                            PacketsIdentityError, CVProfileValidationError)) or permanent_cv_truncation:
             public_error = (
                 "La respuesta del análisis del CV quedó incompleta por el límite de salida. "
                 "Volvé a intentarlo más tarde."
