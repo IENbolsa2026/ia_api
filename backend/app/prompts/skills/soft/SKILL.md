@@ -5,7 +5,7 @@ Emití solo categorías sustentadas por cita o acción concreta; sin mínimos, c
 1. Pensamiento crítico — `soft.critical_thinking`: examina evidencia, contrasta alternativas/causas y justifica decisiones.
 2. Alfabetización en IA — `soft.ai_literacy`: usa o evalúa IA con criterio y reconoce límites.
 3. Inteligencia emocional — `soft.emotional_intelligence`: regula emociones, aplica empatía o gestiona tensiones descritas.
-4. Learnability — `soft.learnability`: aprende y aplica conocimientos ante una necesidad; cursos solos no bastan.
+4. Capacidad de aprendizaje — `soft.learnability`: aprende y aplica conocimientos ante una necesidad; cursos solos no bastan.
 5. Comunicación — `soft.communication`: explica, escucha, transmite o adapta información.
 6. Colaboración — `soft.collaboration`: trabaja con otros hacia una meta compartida.
 7. Adaptabilidad al cambio — `soft.adaptability`: ajusta su actuación ante un cambio concreto.

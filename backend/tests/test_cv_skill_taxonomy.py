@@ -19,7 +19,7 @@ def skill(name, *, kind='soft', concept=None, level='unknown', origin='declared'
 class SoftSkillTaxonomyTests(unittest.TestCase):
     def test_exact_closed_catalog_is_available_without_forcing_all_ten(self):
         self.assertEqual(list(SOFT_SKILL_TAXONOMY), [
-            'Pensamiento crítico', 'Alfabetización en IA', 'Inteligencia emocional', 'Learnability',
+            'Pensamiento crítico', 'Alfabetización en IA', 'Inteligencia emocional', 'Capacidad de aprendizaje',
             'Comunicación', 'Colaboración', 'Adaptabilidad al cambio', 'Creatividad',
             'Responsabilidad', 'Proactividad',
         ])
@@ -33,7 +33,7 @@ class SoftSkillTaxonomyTests(unittest.TestCase):
             '  PENSAMIENTO   CRITICO ': 'Pensamiento crítico',
             'Alfabetización en inteligencia artificial': 'Alfabetización en IA',
             'emotional intelligence': 'Inteligencia emocional',
-            'aprendizaje continuo': 'Learnability',
+            'aprendizaje continuo': 'Capacidad de aprendizaje',
             'Comunicación efectiva verbal y escrita': 'Comunicación',
             'Trabajo en equipo': 'Colaboración',
             'adaptación al cambio': 'Adaptabilidad al cambio',
@@ -213,3 +213,27 @@ class NonCompetencyNameTests(unittest.TestCase):
                 self.assertIsNone(non_competency_kind(name))
                 row = skill(name, kind='technical')
                 self.assertEqual(normalize_expanded_skills([row]), [row])
+
+
+class SpanishSoftSkillNamesTests(unittest.TestCase):
+    def test_closed_catalog_has_no_english_names(self):
+        self.assertIn('Capacidad de aprendizaje', SOFT_SKILL_TAXONOMY)
+        self.assertNotIn('Learnability', SOFT_SKILL_TAXONOMY)
+
+    def test_english_soft_skill_names_map_to_spanish_categories(self):
+        cases = {
+            'Learnability': ('Capacidad de aprendizaje', 'soft.learnability'),
+            'Fast learner': ('Capacidad de aprendizaje', 'soft.learnability'),
+            'Teamwork': ('Colaboración', 'soft.collaboration'),
+            'Communication skills': ('Comunicación', 'soft.communication'),
+            'Adaptability': ('Adaptabilidad al cambio', 'soft.adaptability'),
+            'Initiative': ('Proactividad', 'soft.proactivity'),
+        }
+        for supplied, (name, concept) in cases.items():
+            with self.subTest(supplied=supplied):
+                [row] = normalize_expanded_skills([skill(supplied)])
+                self.assertEqual((row['name'], row['concept_id']), (name, concept))
+
+    def test_english_soft_skills_outside_the_catalog_are_rejected(self):
+        with self.assertRaises(SkillTaxonomyError):
+            normalize_expanded_skills([skill('Leadership')])
