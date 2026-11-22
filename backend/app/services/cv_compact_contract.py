@@ -269,7 +269,7 @@ def validate_expanded_profile(profile: dict, source_text: str, candidate_id: int
         'education': ground_education(retain_explicit_courses(
             retain_explicit_academic_education(profile.get('education', []), source_text),
             source_text,
-        ), source_text),
+        ), source_text, drop_unsupported=True),
     })
     profile['skills'] = normalize_expanded_skills(
         _restore_project_list_skills(profile.get('skills', []), profile.get('projects', [])),
