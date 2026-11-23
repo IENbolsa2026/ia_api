@@ -492,3 +492,27 @@ El paquete `ien_contracts/` se incluye en el repositorio. No requiere la carpeta
 externa `C:\IEN\contracts`. Mantener sus modelos y el helper de límites de
 procesos sincronizados con Django. Los nuevos pedidos usan `match.v2`, incluyen
 la fecha de evaluación y guardan configuración, modelo y versiones utilizados.
+
+## Cursos recomendados a partir de un match guardado
+
+La selección de cursos pertenece a Django (`matching.course_recommendations`).
+Al abrir el detalle de un match completado, Django relaciona las brechas
+entrenables con los cursos activos del catálogo, por título, habilidades
+asociadas y descripción. Utiliza los requisitos congelados en `offer_snapshot`
+y las evaluaciones de `resultado.assessments`, identificadas por
+`requirement_id`, `category` y `status`. `unknown` se presenta como sugerencia
+opcional por falta de información, sin afirmar que falta la habilidad.
+
+Consultar esas recomendaciones no solicita otro match, no invoca un modelo ni
+requiere iniciar el worker o los despachadores. El análisis original del CV y
+la evaluación inicial de compatibilidad mantienen su circuito de IA habitual.
+La API conserva `match.v2` y `match-result.v2`; no se añade un endpoint de cursos.
+
+La guía de [recomendaciones de cursos en BolsaTrabajo](https://github.com/Deathstone16/BolsaTrabajo/blob/develop/docs/funcionalidades/recomendaciones-cursos.md)
+describe la preparación local, el diagnóstico del catálogo y la prueba de
+navegador con datos sintéticos y limpieza. Para verificar los contratos de la
+API, ejecutar `python -m pytest -q` desde `backend` con su entorno virtual.
+
+Validación local del 13/11/2026: 269 pruebas de la API aprobadas, desde
+`origin/main` (`17ab6d0`), sin llamadas a proveedores reales ni cambios en los
+contratos del recomendador.

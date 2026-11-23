@@ -20,7 +20,7 @@ SOFT_SKILL_TAXONOMY = {
     'Pensamiento crítico': 'soft.critical_thinking',
     'Alfabetización en IA': 'soft.ai_literacy',
     'Inteligencia emocional': 'soft.emotional_intelligence',
-    'Learnability': 'soft.learnability',
+    'Capacidad de aprendizaje': 'soft.learnability',
     'Comunicación': 'soft.communication',
     'Colaboración': 'soft.collaboration',
     'Adaptabilidad al cambio': 'soft.adaptability',
@@ -30,18 +30,23 @@ SOFT_SKILL_TAXONOMY = {
 }
 
 _ALIASES = {
-    'Pensamiento crítico': ('critical thinking',),
+    'Pensamiento crítico': ('critical thinking', 'critical-thinking'),
     'Alfabetización en IA': ('alfabetización en inteligencia artificial', 'ai literacy'),
-    'Inteligencia emocional': ('emotional intelligence',),
-    'Learnability': ('aprendizaje continuo', 'aprendizaje permanente', 'capacidad de aprendizaje'),
+    'Inteligencia emocional': ('emotional intelligence', 'emotional awareness'),
+    'Capacidad de aprendizaje': ('aprendizaje continuo', 'aprendizaje permanente', 'learnability',
+                                 'continuous learning', 'lifelong learning', 'learning agility',
+                                 'fast learner', 'quick learner', 'willingness to learn'),
     'Comunicación': ('comunicación efectiva', 'comunicación verbal y escrita',
                      'comunicación efectiva verbal y escrita', 'habilidades de comunicación',
-                     'comunicación interpersonal', 'communication'),
-    'Colaboración': ('trabajo en equipo', 'trabajo colaborativo', 'teamwork', 'collaboration'),
-    'Adaptabilidad al cambio': ('adaptabilidad', 'adaptación al cambio'),
-    'Creatividad': ('creativity',),
+                     'comunicación interpersonal', 'communication', 'communication skills',
+                     'effective communication', 'verbal and written communication'),
+    'Colaboración': ('trabajo en equipo', 'trabajo colaborativo', 'teamwork', 'collaboration',
+                     'team work', 'team player'),
+    'Adaptabilidad al cambio': ('adaptabilidad', 'adaptación al cambio', 'adaptability',
+                                'adaptability to change', 'flexibility'),
+    'Creatividad': ('creativity', 'creative thinking'),
     'Responsabilidad': ('responsibility',),
-    'Proactividad': ('iniciativa', 'proactivity'),
+    'Proactividad': ('iniciativa', 'proactivity', 'initiative', 'proactiveness'),
 }
 _LEGACY_CONCEPTS = {
     'soft.teamwork': 'soft.collaboration',
@@ -64,7 +69,9 @@ _CONCEPTS = {concept: concept for concept in SOFT_SKILL_TAXONOMY.values()} | _LE
 _OUTSIDE_SOFT_NAMES = {
     _key(name) for name in ('Liderazgo', 'Organización', 'Gestión del tiempo', 'Resolución de problemas',
                            'Atención al detalle', 'Orientación al cliente', 'Pensamiento analítico',
-                           'Pensamiento estructurado', 'Pensamiento sistémico')
+                           'Pensamiento estructurado', 'Pensamiento sistémico',
+                           'Leadership', 'Organization', 'Time management', 'Problem solving',
+                           'Attention to detail', 'Customer orientation', 'Analytical thinking')
 }
 
 

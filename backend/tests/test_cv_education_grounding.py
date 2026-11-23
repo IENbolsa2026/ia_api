@@ -265,3 +265,20 @@ class AcademicPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['education'][0]['completion_status'], 'in_progress')
         self.assertEqual([skill['name'] for skill in result['skills']], ['Colaboración'])
         self.assertEqual(checkpoints[-1]['consolidation']['result'], result)
+
+
+class UnsupportedStudyDoesNotDiscardProfileTests(unittest.TestCase):
+    def test_final_profile_omits_only_the_unsupported_study(self):
+        source = 'Licenciatura en Enfermería, en curso. Curso de Excel avanzado finalizado.'
+        rows = [
+            {'level': 'bachelor', 'field': 'Enfermería', 'source_quotes': ['Licenciatura en Enfermería, en curso.']},
+            # The quote exists but does not identify a doctorate: unsupported row.
+            {'level': 'doctorate', 'field': 'Enfermería', 'source_quotes': ['Licenciatura en Enfermería, en curso.']},
+        ]
+        with self.assertRaises(ValueError):
+            ground_education(rows, source)
+        with self.assertLogs('app.services.cv_education_guard', level='WARNING'):
+            result = ground_education(rows, source, drop_unsupported=True)
+        self.assertEqual([row['level'] for row in result], ['bachelor'])
+        self.assertEqual(result[0]['completion_status'], 'in_progress')
+        self.assertEqual(rows[0].get('completion_status'), None)  # Input is not mutated.

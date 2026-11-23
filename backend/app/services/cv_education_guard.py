@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import copy
+import logging
 import re
 import unicodedata
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize(text: str) -> str:
@@ -105,25 +108,40 @@ def _completion_status(evidence: str) -> str:
     return 'unknown'
 
 
-def ground_education(education: list[dict], source_text: str) -> list[dict]:
-    """Every extracted study needs its own quote; unspecified completion stays unknown."""
+def ground_education(education: list[dict], source_text: str, *, drop_unsupported: bool = False) -> list[dict]:
+    """Every extracted study needs its own quote; unspecified completion stays unknown.
+
+    With ``drop_unsupported`` a study whose quotes do not identify it is
+    omitted instead of rejecting the whole profile: one unsupported row must
+    not discard every other grounded fact of the CV.
+    """
     source = ' '.join(source_text.split()).casefold()
-    rows = copy.deepcopy(education)
-    for row in rows:
-        quotes = row.get('source_quotes', [])
-        if not quotes or any(not quote.strip() or len(quote) > 160 or ' '.join(quote.split()).casefold() not in source for quote in quotes):
-            raise ValueError('Cada estudio requiere citas literales del programa y su estado en el CV.')
-        if (row.get('level') == 'technical' and row.get('field')
-                and not any(re.search(_LEVEL_ANCHORS['technical'], _normalize(quote)) for quote in quotes)
-                and any(_within_education_section(quote, source_text) for quote in quotes)):
-            # Professional training is not necessarily a formal Tecnicatura.
-            row['level'] = 'other'
-        statuses = {_completion_status(context) for context in _study_context(row, quotes)}
-        # Ambiguous/contradictory mentions cannot grant a degree.
-        status = statuses.pop() if len(statuses) == 1 else 'unknown'
-        row['completion_status'] = status
-        row['completed'] = True if status == 'completed' else False if status in {'in_progress', 'incomplete'} else None
-    return rows
+    grounded = []
+    for row in copy.deepcopy(education):
+        try:
+            grounded.append(_ground_study(row, source, source_text))
+        except ValueError:
+            if not drop_unsupported:
+                raise
+            logger.warning('CV education row omitted: level=%s reason=unsupported_quote', row.get('level'))
+    return grounded
+
+
+def _ground_study(row: dict, source: str, source_text: str) -> dict:
+    quotes = row.get('source_quotes', [])
+    if not quotes or any(not quote.strip() or len(quote) > 160 or ' '.join(quote.split()).casefold() not in source for quote in quotes):
+        raise ValueError('Cada estudio requiere citas literales del programa y su estado en el CV.')
+    if (row.get('level') == 'technical' and row.get('field')
+            and not any(re.search(_LEVEL_ANCHORS['technical'], _normalize(quote)) for quote in quotes)
+            and any(_within_education_section(quote, source_text) for quote in quotes)):
+        # Professional training is not necessarily a formal Tecnicatura.
+        row['level'] = 'other'
+    statuses = {_completion_status(context) for context in _study_context(row, quotes)}
+    # Ambiguous/contradictory mentions cannot grant a degree.
+    status = statuses.pop() if len(statuses) == 1 else 'unknown'
+    row['completion_status'] = status
+    row['completed'] = True if status == 'completed' else False if status in {'in_progress', 'incomplete'} else None
+    return row
 
 
 def retain_explicit_courses(education: list[dict], source_text: str) -> list[dict]:

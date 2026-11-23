@@ -21,7 +21,7 @@ Toda skill soft debe usar exactamente uno de estos nombres y ci. Agrupá equival
 1. Pensamiento crítico — soft.critical_thinking: examinar evidencia, contrastar causas/alternativas y justificar decisiones. Resolver una tarea rutinaria no basta. Pensamiento analítico solo se engloba cuando las acciones demuestran ese examen crítico.
 2. Alfabetización en IA — soft.ai_literacy: comprender o usar IA con criterio, evaluar resultados y reconocer límites. No asumirla por ser técnico, estudiar informática o nombrar software. En esta taxonomía se clasifica como soft; el manejo concreto de una herramienta puede ser technical si tiene evidencia propia diferenciada.
 3. Inteligencia emocional — soft.emotional_intelligence: reconocer/reglar emociones propias o ajenas, empatía aplicada y manejo de tensiones descritas. Atención al cliente, amabilidad o trabajo con personas no bastan por sí solos.
-4. Learnability — soft.learnability: aprendizaje continuo, aprender a aprender, adquirir y aplicar conocimientos ante una necesidad descrita. Un listado de cursos o un título por sí solo no demuestra esa capacidad.
+4. Capacidad de aprendizaje — soft.learnability: aprendizaje continuo, aprender a aprender, adquirir y aplicar conocimientos ante una necesidad descrita. Un listado de cursos o un título por sí solo no demuestra esa capacidad.
 5. Comunicación — soft.communication: explicar, escuchar, transmitir o adaptar información a interlocutores. Reuní comunicación oral, escrita y efectiva en una categoría, manteniendo sus matices en evidencia.
 6. Colaboración — soft.collaboration: trabajar con otras personas hacia una meta compartida. Engloba trabajo en equipo y cooperación. Dirigir personas o pertenecer a una empresa no demuestra automáticamente colaboración.
 7. Adaptabilidad al cambio — soft.adaptability: ajustar conductas/procedimientos ante un cambio concreto. Engloba adaptabilidad y flexibilidad sustentadas; cambiar de empleo no basta.
@@ -43,6 +43,13 @@ FORMACIÓN SIN SUPONER GRADUACIÓN:
 - Cada ed requiere q con citas que identifiquen el programa y su estado. st=completed solo si el CV declara título obtenido/graduación; st=in_progress para cursando/en curso/doctorando/estudiante; st=incomplete para carrera abandonada, incompleta o tesis/defensa/titulación pendiente; st=unknown cuando no se sabe. c=true solo para completed, c=false para in_progress/incomplete, c=null para unknown.
 - No deduzcas finalización por fechas pasadas, año de inicio, duración prevista, antigüedad o nombre del programa. «Doctorado en Informática, en curso» es un estudio en curso, nunca «Doctor en Informática». «Tesis pendiente», «cursada completa» o «asignaturas aprobadas» no equivalen a título obtenido. Un grado inferior obtenido no convierte el superior en finalizado.
 - h/s conservan estas distinciones. No presentes a un estudiante como graduado ni atribuyas doctor, magíster, licenciado, ingeniero, certificación o licencia obtenidos si no están explícitos. Si mencionás formación no finalizada, indicá el estado. No conviertas un curso activo en una certificación.
+
+IDIOMA DE SALIDA: SIEMPRE EN ESPAÑOL
+- El CV puede estar en inglés u otro idioma: analizalo con el mismo criterio y la misma exhaustividad que uno en español; no omitas hechos por el idioma.
+- Todo texto que generes va en español: n de habilidades (salvo tecnologías y productos), e, h, s, t y h de experiencias, h de proyectos, f de estudios, n de idiomas (Inglés, Portugués…) y nombres genéricos de certificaciones. Traducí con fidelidad, sin agregar ni exagerar nada.
+- Mantené sin traducir los nombres propios: tecnologías, lenguajes, software, marcas, empresas, instituciones, nombres de proyectos y títulos oficiales de certificaciones (Python, Excel, AWS Certified Cloud Practitioner).
+- Las blandas usan solo los diez nombres en español de la lista cerrada, aunque el CV diga teamwork, communication o learnability.
+- Las citas q nunca se traducen: son literales del CV, en su idioma original. Un estado en inglés (in progress, completed, graduated) se interpreta igual que en español.
 
 TRANSPORTE:
 - n es nombre legible, nunca un ID soft.*. sk: n nombre, k technical/soft/unknown, l beginner/intermediate/advanced/expert/unknown, o declared/inferred, y años, e evidencias, q citas, ci concepto.
