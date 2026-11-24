@@ -549,7 +549,10 @@ async def process_packetized_cv_text(
                     system_prompt, payload,
                     f"cv-packet-{identity['job_id']}-{packet_id}-validation-{attempt}",
                     on_heartbeat=on_heartbeat,
-                    **({'defer_quota_waits': True} if efficient else {}),
+                    # Keep a short quota wait inside the validation repair so
+                    # its corrective prompt survives. Deferring attempt 1
+                    # restarted attempt 0 forever when the fallback was paced.
+                    **({'defer_quota_waits': attempt == 0} if efficient else {}),
                 )
                 provider_model = raw.pop("__provider_model", None)
                 if efficient and len(packet_text) >= 80:
