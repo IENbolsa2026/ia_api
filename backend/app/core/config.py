@@ -75,6 +75,9 @@ class Settings(BaseSettings, extra="ignore"):
     SKILL_CATALOG_EMBEDDING_DIMENSIONS: int = Field(default=384, ge=1)
     SKILL_CATALOG_EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     CV_EXTRACTION_MAX_TOKENS: int = Field(default=950, ge=1)
+    CV_PACKETS_PER_TURN: int = Field(default=1, ge=1, le=10)
+    CV_MAX_NO_PROGRESS_SECONDS: int = Field(default=900, ge=60, le=86400)
+    CV_MAX_PROCESSING_SECONDS: int = Field(default=1800, ge=60, le=86400)
     GROQ_MAX_TOKENS: int = 6000
     GROQ_PAUSA_SEGUNDOS: int = 12
     GROQ_REQUESTS_PER_MINUTE: int = 20

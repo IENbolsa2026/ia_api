@@ -67,7 +67,7 @@ class ProviderOutageTests(unittest.TestCase):
                 finally:
                     run_extraction_task.pop_request()
                 self.assertEqual(raised.exception.when, 90)
-                self.assertEqual(state['status'], 'processing')
+                self.assertEqual(state['status'], 'rate_limited')
                 self.assertEqual(state['provider_unavailable_failures'], 1)
                 self.assertEqual(state['extraction_packets'], advanced)
                 self.assertIsNone(state['error'])

@@ -24,6 +24,9 @@ from app.services.document_extractor_runner import extract_in_subprocess
 from app.services.rate_limiter import ProviderInputLimitExceeded, ProviderOutputLimitExceeded, ProviderResponseTruncated, RateLimitExceeded
 from app.services.gemini_client import GeminiUnavailable
 from app.services.llm_router import configured_model as router_model
+from app.services.cv_queue import (
+    CVQueueExpired, CVTurnComplete, ensure_window, retry_delay, start_tracking, utc_now, wait_state,
+)
 from app.services.result_notifier import notify_extraction_result
 from app.services.channel_events import publish_cv_analysis_complete
 
@@ -79,7 +82,8 @@ def _queue_result_delivery(task: Any, store: ExtractionJobStore, job_id: str, *,
         ) from exc
 
 
-@celery_app.task(bind=True, max_retries=5, name="app.tasks.run_extraction")
+@celery_app.task(bind=True, max_retries=5, name="app.tasks.run_extraction",
+                 soft_time_limit=240, time_limit=300, acks_on_failure_or_timeout=False)
 def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
     store = ExtractionJobStore()
     job = store.get(job_id)
@@ -101,7 +105,7 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
             # slot. This retry is queue contention, not a provider attempt.
             raise self.retry(
                 exc=RuntimeError("La cola de CV sigue ocupada."),
-                countdown=5,
+                countdown=retry_delay(job, 5),
                 max_retries=max(1000, int(self.request.retries) + 1),
             )
         serial_lock_acquired = True
@@ -109,7 +113,8 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
         if not store.acquire_lock(job_id):
             # A redelivery can race with an execution that still owns its
             # per-job lease. Release the serial slot in finally before retrying.
-            countdown = min(600, 30 * (2 ** max(0, int(self.request.retries))))
+            countdown = (retry_delay(job, 30) if is_candidate_cv else
+                         min(600, 30 * (2 ** min(4, max(0, int(self.request.retries))))))
             retry_options = {"max_retries": max(1000, int(self.request.retries) + 1)} if is_candidate_cv else {}
             raise self.retry(
                 exc=RuntimeError("El trabajo sigue bloqueado por otra ejecución."),
@@ -132,7 +137,12 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
         completed_packets_at_start = count_completed_packets(packet_checkpoint)
         rate_limit_stalls = int(job.get("rate_limit_stalls", 0))
         provider_failures = int(job.get("provider_failures", 0))
-        store.update_owned(job_id, status="processing", error=None)
+        tracking = start_tracking(job) if is_candidate_cv else {}
+        job.update(tracking)
+        if is_candidate_cv:
+            ensure_window(job)
+        store.update_owned(job_id, status="processing", error=None,
+                           next_attempt_at=None, wait_reason=None, **tracking)
         if payload["kind"] == "candidate_cv":
             if payload.get("artifact_id"):
                 artifact_id = payload["artifact_id"]
@@ -183,8 +193,29 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
                 budget=settings.CV_EXTRACTION_MAX_TOKENS,
             )
 
+            repair_packets = set(job.get('repair_packets') or [])
+            last_completed = completed_packets_at_start
+
+            def save_validation_retry(packet_id: str) -> None:
+                repair_packets.add(packet_id)
+                store.update_owned(job_id, repair_packets=sorted(repair_packets))
+
             def save_packet_checkpoint(value: dict[str, Any]) -> None:
-                store.update_owned(job_id, extraction_packets=value)
+                nonlocal last_completed
+                completed = count_completed_packets(value)
+                changes = {'extraction_packets': value}
+                if completed > last_completed:
+                    job['last_progress_at'] = utc_now().isoformat()
+                    changes.update(last_progress_at=job['last_progress_at'],
+                                   provider_unavailable_failures=0, rate_limit_stalls=0)
+                last_completed = completed
+                repair_packets.intersection_update(
+                    pid for pid, packet in value.get('packets', {}).items() if packet.get('status') == 'pending')
+                changes['repair_packets'] = sorted(repair_packets)
+                store.update_owned(job_id, **changes)
+                if (completed - completed_packets_at_start >= settings.CV_PACKETS_PER_TURN
+                        and any(p.get('status') == 'pending' for p in value.get('packets', {}).values())):
+                    raise CVTurnComplete()
 
             result = asyncio.run(process_cv_text(
                 text,
@@ -193,6 +224,8 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
                 checkpoint=packet_checkpoint,
                 on_checkpoint=save_packet_checkpoint,
                 on_heartbeat=extraction_heartbeat,
+                repair_packets=repair_packets,
+                on_validation_retry=save_validation_retry,
             ))
         elif payload["kind"] == "job_offer":
             result = asyncio.run(process_offer_snapshot(payload["offer_snapshot"], int(payload["offer_id"])))
@@ -207,11 +240,21 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
             else settings.GEMINI_MODEL if settings.LLM_PROVIDER.strip().lower() == "gemini"
             else settings.CV_MODEL
         )
-        store.update_owned(job_id, status="completed", result=result, error=None, provider_model=provider_model)
+        store.update_owned(job_id, status="completed", result=result, error=None, provider_model=provider_model,
+                           next_attempt_at=None, wait_reason=None)
         if payload.get("artifact_id"):
             delete_artifact(payload["artifact_id"], payload.get("format", ""))
         _queue_result_delivery(self, store, job_id, owned=True)
         return {"job_id": job_id, "status": "completed"}
+    except CVTurnComplete as exc:
+        countdown = retry_delay(job, 1)
+        try:
+            store.update_owned(job_id, status='queued', error=None, **wait_state(job, 'queue_turn', countdown))
+        except LockOwnershipLost as lock_exc:
+            raise self.retry(exc=lock_exc, countdown=30,
+                             max_retries=max(1000, self.request.retries + 1)) from lock_exc
+        raise self.retry(exc=exc, countdown=countdown,
+                         max_retries=max(1000, self.request.retries + 1)) from exc
     except Retry:
         raise
     except LockOwnershipLost as exc:
@@ -230,8 +273,10 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
         exhausted = failures >= self.max_retries
         error = f'{exc.provider_label} sigue sin estar disponible. Intentá realizar el análisis más tarde.' if exhausted else None
         try:
-            store.update_owned(job_id, status='failed' if exhausted else 'processing',
-                               error=error, provider_unavailable_failures=failures)
+            countdown = retry_delay(job, exc.retry_countdown(failures))
+            store.update_owned(job_id, status='failed' if exhausted else ('rate_limited' if is_candidate_cv else 'processing'),
+                               error=error, provider_unavailable_failures=failures,
+                               **wait_state(job, 'provider_unavailable', countdown))
         except LockOwnershipLost as lock_exc:
             raise self.retry(exc=lock_exc, countdown=30, max_retries=max(1000, self.request.retries + 1)) from lock_exc
         if exhausted:
@@ -239,17 +284,18 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
                 delete_artifact(payload['artifact_id'], payload.get('format', ''))
             _queue_result_delivery(self, store, job_id, owned=True)
             return {'job_id': job_id, 'status': 'failed'}
-        countdown = exc.retry_countdown(failures)
         logger.warning('Extraction deferred for provider outage job=%s failures=%d seconds=%d', job_id, failures, countdown)
         raise self.retry(exc=exc, countdown=countdown, max_retries=max(1000, self.request.retries + 1)) from exc
     except RateLimitExceeded as exc:
         if exc.is_local_wait:
+            countdown = retry_delay(job, max(1, int(exc.retry_after_seconds) + 1))
             try:
-                store.update_owned(job_id, status="rate_limited", error=None)
+                store.update_owned(job_id, status="rate_limited", error=None,
+                                   **wait_state(job, 'provider_quota', countdown))
             except LockOwnershipLost as lock_exc:
                 raise self.retry(exc=lock_exc, countdown=30, max_retries=max(1000, self.request.retries + 1)) from lock_exc
             raise self.retry(
-                exc=exc, countdown=max(1, int(exc.retry_after_seconds) + 1),
+                exc=exc, countdown=countdown,
                 max_retries=max(1000, self.request.retries + 1),
             ) from exc
         is_packet_cv = bool(payload and payload.get("kind") == "candidate_cv")
@@ -292,7 +338,7 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
         permanent_cv_truncation = (
             payload.get("kind") == "candidate_cv" and isinstance(exc, ProviderResponseTruncated)
         )
-        if isinstance(exc, (DocumentRejected, ProviderInputLimitExceeded, ProviderOutputLimitExceeded,
+        if isinstance(exc, (CVQueueExpired, DocumentRejected, ProviderInputLimitExceeded, ProviderOutputLimitExceeded,
                             PacketsIdentityError, CVProfileValidationError)) or permanent_cv_truncation:
             public_error = (
                 "La respuesta del análisis del CV quedó incompleta por el límite de salida. "

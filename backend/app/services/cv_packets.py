@@ -43,7 +43,7 @@ class CVProfileValidationError(ValueError):
     """Grounded packet facts failed final local validation; retries cannot fix it."""
 
     def __init__(self) -> None:
-        super().__init__("No se pudo validar el contenido extraído del CV. Revisá el documento y volvé a intentarlo.")
+        super().__init__("No pudimos validar la respuesta de IA para este CV. Intentá nuevamente más tarde.")
 
 
 def checkpoint_prompt_version(checkpoint: dict | None) -> str:
@@ -82,6 +82,22 @@ def _quote_catalog(text: str) -> dict[str, str]:
         if first and second and study_start.search(first) and len(pair) <= 160 and pair not in spans:
             spans.append(pair)
     return {f"quote_{index}": span for index, span in enumerate(spans)}
+
+
+def _validation_repair_instruction() -> str:
+    return (
+        "\nLa respuesta anterior no pasó la validación. Volvé a extraer desde el texto original: "
+        "respetá los tipos y límites de todos los arrays; cada cita q debe ser una subcadena literal "
+        "de ese texto de hasta 160 caracteres, sin cambios de conjugación ni ortografía. "
+        "No inventes evidencia para completar campos."
+        " El nombre n debe ser legible en español; los identificadores soft.* corresponden a ci, nunca a n."
+        " Las blandas deben pertenecer a las diez categorías permitidas. No llames skill al cargo, curso o título;"
+        " sí conservá una tecnología o conocimiento explícito dentro de ese texto: 'programador en Python' respalda Python."
+        " No omitas herramientas nombradas en un stack ni tecnologías distintas por un ci genérico."
+        " Cada estudio ed debe traer q con citas del programa y su estado; conservá en curso/incompleto y no supongas graduación."
+        " ed.f debe usar palabras del programa presentes en esa misma cita, sin combinar cursos;"
+        " cada elemento de x.h debe ser breve, no vacío y de 160 caracteres o menos."
+    )
 
 
 def _resolve_quote_ids(raw: dict, catalog: dict[str, str]) -> dict:
@@ -491,6 +507,8 @@ async def process_packetized_cv_text(
     on_checkpoint,
     on_heartbeat,
     call_provider,
+    repair_packets: set[str] | None = None,
+    on_validation_retry=None,
 ) -> tuple[dict[str, Any], str | None]:
     previous_schema = checkpoint.get("schema_version") if isinstance(checkpoint, dict) else None
     manifest = new_manifest(text, identity) if checkpoint is None else validate_manifest(checkpoint, text, identity)
@@ -542,17 +560,20 @@ async def process_packetized_cv_text(
                     "fragment_schema": _fragment_schema(),
                     **({'source_format': 'annotated-quotes.v1'} if efficient else {}),
                 }, ensure_ascii=False)
+        start_attempt = 1 if repair_packets and packet_id in repair_packets else 0
+        if start_attempt:
+            system_prompt += _validation_repair_instruction()
         try:
-            for attempt in range(2):
+            for attempt in range(start_attempt, 2):
                 resolved = None
                 raw = await call_provider(
                     system_prompt, payload,
                     f"cv-packet-{identity['job_id']}-{packet_id}-validation-{attempt}",
                     on_heartbeat=on_heartbeat,
-                    # Keep a short quota wait inside the validation repair so
-                    # its corrective prompt survives. Deferring attempt 1
-                    # restarted attempt 0 forever when the fallback was paced.
-                    **({'defer_quota_waits': attempt == 0} if efficient else {}),
+                    # Workers persist repair state before yielding on quota.
+                    # Direct callers without persistence keep short waits inline.
+                    **({'defer_quota_waits': on_validation_retry is not None or attempt == 0}
+                       if efficient or on_validation_retry is not None else {}),
                 )
                 provider_model = raw.pop("__provider_model", None)
                 if efficient and len(packet_text) >= 80:
@@ -582,19 +603,13 @@ async def process_packetized_cv_text(
                         logger.warning("CV packet retained grounded facts after validation retry: dropped=%s", dropped)
                         break
                     logger.info("CV packet validation retry id=%s", packet_id)
-                    system_prompt += (
-                        "\nLa respuesta anterior no pasó la validación. Volvé a extraer desde el texto original: "
-                        "respetá los tipos y límites de todos los arrays; cada cita q debe ser una subcadena literal "
-                        "de ese texto de hasta 160 caracteres, sin cambios de conjugación ni ortografía. "
-                        "No inventes evidencia para completar campos."
-                        " El nombre n debe ser legible en español; los identificadores soft.* corresponden a ci, nunca a n."
-                        " Las blandas deben pertenecer a las diez categorías permitidas. No llames skill al cargo, curso o título;"
-                        " sí conservá una tecnología o conocimiento explícito dentro de ese texto: 'programador en Python' respalda Python."
-                        " No omitas herramientas nombradas en un stack ni tecnologías distintas por un ci genérico."
-                        " Cada estudio ed debe traer q con citas del programa y su estado; conservá en curso/incompleto y no supongas graduación."
-                        " ed.f debe usar palabras del programa presentes en esa misma cita, sin combinar cursos;"
-                        " cada elemento de x.h debe ser breve, no vacío y de 160 caracteres o menos."
-                    )
+                    if on_validation_retry is not None:
+                        if inspect.iscoroutinefunction(on_validation_retry):
+                            await on_validation_retry(packet_id)
+                        else:
+                            import asyncio
+                            await asyncio.to_thread(on_validation_retry, packet_id)
+                    system_prompt += _validation_repair_instruction()
         except (ProviderResponseTruncated, ProviderInputLimitExceeded) as exc:
             if isinstance(exc, ProviderInputLimitExceeded):
                 fixed_payload = json.loads(payload)

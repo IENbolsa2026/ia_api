@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.security import require_service_token
 from app.schemas.cv_analysis import CVAnalysisAccepted, CVAnalysisStatus, CVAnalysisTaskStatus
 from app.services.job_store import ExtractionJobStore
+from app.services.cv_queue import public_progress
 from app.services.cv_artifacts import artifact_path, delete_artifact
 from app.services.document_text import DocumentRejected, detect_format, enabled_formats, legacy_converter_available
 from ien_contracts.utils import content_hash
@@ -183,4 +184,4 @@ async def retrieve_cv_analysis(job_id: str, _: None = Depends(require_service_to
         api_status = "completed" if job.get("result") is not None else "failed"
     else:
         api_status = raw_status if raw_status in CVAnalysisStatus._value2member_map_ else "processing"
-    return CVAnalysisTaskStatus(job_id=job_id, status=CVAnalysisStatus(api_status), result=job.get("result"), error=job.get("error"), delivered=raw_status == "delivered")
+    return CVAnalysisTaskStatus(job_id=job_id, status=CVAnalysisStatus(api_status), result=job.get("result"), error=job.get("error"), delivered=raw_status == "delivered", **public_progress(job))

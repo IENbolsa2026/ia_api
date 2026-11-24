@@ -105,6 +105,21 @@ class WireLanguage(_WireModel):
     level: Literal["basic", "conversational", "professional", "native", "unknown"] = Field(default="unknown", alias="l")
 
 
+    @field_validator('level', mode='before')
+    @classmethod
+    def conservative_language_level(cls, value):
+        # Transport-only normalization: unsupported model classifications must
+        # not invalidate an otherwise grounded CV or award an invented level.
+        if isinstance(value, str):
+            normalized = value.strip().casefold()
+            if normalized in {'basic', 'conversational', 'professional', 'native', 'unknown'}:
+                return normalized
+            return {'básico': 'basic', 'basico': 'basic', 'conversacional': 'conversational',
+                    'profesional': 'professional', 'nativo': 'native', 'nativa': 'native',
+                    'desconocido': 'unknown'}.get(normalized, 'unknown')
+        return value
+
+
 class WirePreferences(_WireModel):
     locations: list[str] = Field(default_factory=list, max_length=10, alias="l")
     work_modes: list[WorkMode] = Field(default_factory=list, max_length=3, alias="w")

@@ -169,3 +169,21 @@ class CompactCvContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LanguageTransportRegressionTests(unittest.TestCase):
+    def test_unsupported_model_language_level_does_not_discard_valid_skills(self):
+        source = 'Uso Python. Inglés intermedio.'
+        expanded, compact = validate_fragment({
+            'sk': [{'n': 'Python', 'q': ['Uso Python.'], 'e': ['Uso Python.']}],
+            'l': [{'n': 'Inglés', 'l': 'intermediate'}],
+        }, source)
+        self.assertEqual(expanded['skills'][0]['name'], 'Python')
+        self.assertEqual(expanded['languages'][0]['level'], 'unknown')
+
+    def test_language_translation_is_not_inferred_from_cefr_or_numbers(self):
+        from app.services.cv_compact_contract import WireLanguage
+        self.assertEqual(WireLanguage.model_validate({'n': 'Inglés', 'l': ' Nativo '}).level, 'native')
+        self.assertEqual(WireLanguage.model_validate({'n': 'Inglés', 'l': 'C2'}).level, 'unknown')
+        with self.assertRaises(ValueError):
+            WireLanguage.model_validate({'n': 'Inglés', 'l': {'arbitrary': 'value'}})

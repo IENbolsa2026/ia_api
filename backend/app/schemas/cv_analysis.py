@@ -36,3 +36,9 @@ class CVAnalysisTaskStatus(BaseModel):
     result: dict[str, Any] | None = None
     error: str | None = None
     delivered: bool = False
+    message: str | None = None
+    completed_packets: int = 0
+    total_packets: int = 0
+    wait_reason: str | None = None
+    next_attempt_at: str | None = None
+    retry_after_seconds: int | None = None

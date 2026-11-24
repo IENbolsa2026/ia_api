@@ -522,7 +522,7 @@ La rama `ia-match` sirve todas las operaciones desde `app.main:app`, puerto 8001
 - WebSocket `/api/v1/ws/v1/matches`: inicia o retoma una comparación desde Django.
 
 Las rutas de análisis y comparación usan el mismo `SERVICE_API_TOKEN`. El worker
-`celery -A app.core.celery_app.celery_app worker --pool=solo` procesa ambas clases
+`celery -A app.core.celery_app.celery_app worker --pool=prefork` procesa ambas clases
 de trabajo. `MATCH_GROQ_MODEL` permite elegir otro modelo para compatibilidad;
 si se omite usa `CV_MODEL`. El limitador Redis de Groq se comparte con extracción
 solo cuando la extracción también usa Groq. La evaluación usa JSON Schema estricto
@@ -584,3 +584,23 @@ API, ejecutar `python -m pytest -q` desde `backend` con su entorno virtual.
 Validación local del 13/11/2026: 269 pruebas de la API aprobadas, desde
 `origin/main` (`17ab6d0`), sin llamadas a proveedores reales ni cambios en los
 contratos del recomendador.
+
+
+## Seguimiento y turnos de CV
+
+En producción Linux el worker usa prefork con concurrencia uno. Cada ejecución
+procesa como máximo `CV_PACKETS_PER_TURN=1` paquetes y cede el turno si quedan
+partes pendientes. La espera de cuota y los intentos de reparación guardan su
+estado y liberan el worker; el orden puede cambiar durante reintentos.
+
+`CV_MAX_NO_PROGRESS_SECONDS=900` limita la espera sin completar otro paquete y
+`CV_MAX_PROCESSING_SECONDS=1800` limita el tiempo desde la primera ejecución.
+El tiempo inicial esperando un worker no se incluye. El vencimiento se verifica
+al reanudar; el tiempo efectivo puede aumentar si la cola está congestionada.
+Cada turno tiene límite blando de 240 segundos y duro de 300; el modo solo no
+ofrece estos límites. Los hard timeouts se reencolan y los leases expiran para
+que otra ejecución pueda recuperar el avance. No cambia la cuota del proveedor.
+
+El GET del trabajo añade `completed_packets`, `total_packets`, `wait_reason`,
+`next_attempt_at` y `retry_after_seconds`. Son indicadores de avance y del
+próximo intento, nunca una estimación garantizada de finalización.

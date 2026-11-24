@@ -263,6 +263,8 @@ async def process_cv_text(
     checkpoint: dict[str, Any] | None = None,
     on_checkpoint=None,
     on_heartbeat=None,
+    repair_packets: set[str] | None = None,
+    on_validation_retry=None,
 ) -> dict[str, Any]:
     """Extract candidate-profile.v2 in job-isolated, resumable text packets."""
     external = identity or {}
@@ -297,6 +299,8 @@ async def process_cv_text(
         on_checkpoint=on_checkpoint,
         on_heartbeat=on_heartbeat,
         call_provider=_call_cv_provider,
+        repair_packets=repair_packets,
+        on_validation_retry=on_validation_retry,
     )
     return PipelineOutput(profile, provider_model)
 
