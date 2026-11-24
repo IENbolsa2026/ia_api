@@ -95,6 +95,32 @@ def test_gateway_model_fallback_can_succeed(setup_router):
     assert post.call_args.kwargs['json']['model'] == 'openai/gpt-4o-mini'
 
 
+def test_groq_output_capacity_rejection_changes_model_instead_of_waiting(setup_router, monkeypatch):
+    _, post, _, get_limiter = setup_router
+    monkeypatch.setattr(settings, 'LLM_FALLBACK_ORDER', ['groq'])
+    monkeypatch.setattr(settings, 'GROQ_FALLBACK_MODELS', ['openai/gpt-oss-120b'])
+    first = router.routes('auto')[0]
+    post.side_effect = [httpx.Response(429, json={'error': {'message':
+        'Request too large: expected output tokens exceed output tokens per minute (OTPM). Limit 1000, Requested 3338'}}), reply()]
+    result = router.generate_json('system', 'source', 'marker')
+    assert result['content'] == {'ok': True}
+    assert post.call_count == 2
+    assert post.call_args.kwargs['json']['model'] == 'openai/gpt-oss-120b'
+    assert post.call_args.kwargs['json']['reasoning_effort'] == 'low'
+    get_limiter(first).defer.assert_called_once_with(300)
+
+
+def test_only_groq_output_capacity_is_a_specific_terminal_error(setup_router, monkeypatch):
+    monkeypatch.setattr(settings, 'LLM_FALLBACK_ORDER', ['groq'])
+    _, post, _, _ = setup_router
+    post.return_value = httpx.Response(429, json={'error': {'message':
+        'Request too large: output tokens per minute (OTPM), Limit: 1000 Requested: 3338'}})
+    with pytest.raises(router.ProviderOutputLimitExceeded) as raised:
+        router.generate_json('system', 'source', 'marker')
+    assert raised.value.limit_num == 1000
+    assert post.call_count == 1
+
+
 @pytest.mark.parametrize('status', [401, 402, 403])
 def test_disabled_key_is_skipped_for_other_models_and_next_call(setup_router, status):
     _, post, _, get_limiter = setup_router

@@ -23,7 +23,7 @@ from app.services.cv_request_budget import prepare_gemini_input
 from app.services.gemini_budget import GeminiBudgetLimiter
 from app.services.gemini_client import GeminiError, GeminiRejected, GeminiUnavailable, generate_json as gemini_json
 from app.services.rate_limiter import (
-    ProviderInputLimitExceeded, ProviderResponseTruncated, RateLimitExceeded,
+    ProviderInputLimitExceeded, ProviderOutputLimitExceeded, ProviderResponseTruncated, RateLimitExceeded,
     RedisRateLimiter, estimate_request_tokens,
 )
 
@@ -123,6 +123,20 @@ def _record_success(limiter: RedisRateLimiter, response: httpx.Response, estimat
         logger.warning('LLM response received; quota bookkeeping unavailable')
 
 
+def _output_capacity_error(response: httpx.Response) -> ProviderOutputLimitExceeded | None:
+    try:
+        body = response.json()
+        error = body.get('error', {}) if isinstance(body, dict) else {}
+        message = str(error.get('message', '')).casefold() if isinstance(error, dict) else ''
+    except ValueError:
+        return None
+    if ('request too large' in message and 'output tokens' in message
+            and ('otpm' in message or ('expected output tokens' in message and 'exceed' in message))):
+        limit = re.search(r'\blimit\s*[:=]?\s*(\d+)\b', message)
+        return ProviderOutputLimitExceeded(int(limit.group(1)) if limit else None)
+    return None
+
+
 def _http_json(route: Route, system: str, payload: str, marker: str, output: int | None,
                timeout: float, credential: RedisRateLimiter) -> dict[str, Any]:
     limit = settings.AI_GATEWAY_MAX_OUTPUT_TOKENS if route.provider == 'vercel' else settings.GROQ_MAX_TOKENS
@@ -153,6 +167,8 @@ def _http_json(route: Route, system: str, payload: str, marker: str, output: int
     }
     if route.provider == 'groq' and route.model == 'qwen/qwen3.8-27b':
         request.update(reasoning_effort='low' if marker == 'match-provider' else 'none', reasoning_format='hidden')
+    elif route.provider == 'groq' and route.model.startswith('openai/gpt-oss-'):
+        request.update(reasoning_effort='low', reasoning_format='hidden')
     url = ('https://ai-gateway.vercel.sh/v1/chat/completions' if route.provider == 'vercel'
            else 'https://api.groq.com/openai/v1/chat/completions')
     try:
@@ -161,6 +177,11 @@ def _http_json(route: Route, system: str, payload: str, marker: str, output: int
     except (httpx.HTTPError, OSError):
         raise ProvidersUnavailable(limiter.defer(30)) from None
     if response.status_code == 429:
+        capacity_error = _output_capacity_error(response) if route.provider == 'groq' else None
+        if capacity_error is not None:
+            limiter.defer(300)
+            logger.info('LLM route output capacity unavailable provider=groq limit=%s', capacity_error.limit_num)
+            raise capacity_error
         raise RateLimitExceeded(limiter.record_response(response.headers, status_code=429, estimated_tokens=estimate))
     if response.status_code in {401, 402, 403}:
         raise RateLimitExceeded(credential.defer(settings.LLM_CREDENTIAL_COOLDOWN_SECONDS), reason='cooldown')
@@ -201,6 +222,7 @@ def generate_json(system: str, payload: str, marker: str, max_output_tokens: int
     deadline = time.monotonic() + settings.LLM_ROUTER_TIMEOUT_SECONDS
     waits: list[float] = []
     input_errors: list[ProviderInputLimitExceeded] = []
+    output_errors: list[ProviderOutputLimitExceeded] = []
     outage = False
     quota_wait = False
     for route in routes(mode, purpose):
@@ -226,6 +248,9 @@ def generate_json(system: str, payload: str, marker: str, max_output_tokens: int
         except ProviderInputLimitExceeded as exc:
             input_errors.append(exc)
             continue
+        except ProviderOutputLimitExceeded as exc:
+            output_errors.append(exc)
+            continue
         except RateLimitExceeded as exc:
             quota_wait = True
             waits.append(time.monotonic() + exc.retry_after_seconds)
@@ -246,4 +271,6 @@ def generate_json(system: str, payload: str, marker: str, max_output_tokens: int
         raise RateLimitExceeded(wait, reason='cooldown')
     if input_errors:
         raise max(input_errors, key=lambda exc: exc.limit_tokens)
+    if output_errors:
+        raise output_errors[-1]
     raise GeminiError('No hay proveedores de IA disponibles.')
