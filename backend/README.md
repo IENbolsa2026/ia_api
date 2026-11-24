@@ -1,5 +1,73 @@
 # Microservicio de analisis de CVs
 
+## Rotación de proveedores, claves y modelos
+
+Para extracción de CV, ofertas, normalización y compatibilidad, habilitá el
+router en el `.env` privado (o `.env.compose` para producción):
+
+```dotenv
+LLM_PROVIDER=auto
+MATCH_PROVIDER=auto
+LLM_FALLBACK_ORDER=["gemini","groq","vercel"]
+AI_GATEWAY_ENABLED=false
+GEMINI_API_KEYS=["clave-gemini-1","clave-gemini-2"]
+GROQ_API_KEYS=["clave-groq-1"]
+AI_GATEWAY_API_KEYS=["clave-vercel-1","clave-vercel-2","clave-vercel-3","clave-vercel-4"]
+AI_GATEWAY_MODELS=["google/gemini-2.5-flash-lite","openai/gpt-4o-mini"]
+GEMINI_FALLBACK_MODELS=[]
+GROQ_FALLBACK_MODELS=[]
+```
+
+Vercel está apagado por defecto. `AI_GATEWAY_ENABLED=false` impide todas las
+llamadas al Gateway, incluso cuando hay claves guardadas o figura en el orden
+de respaldo. Para habilitarlo, cambiá a `AI_GATEWAY_ENABLED=true` y reiniciá API
+y worker. El modo exclusivo `vercel` da un error de configuración si el
+interruptor está apagado. Esta opción controla el envío de solicitudes del
+proyecto; no modifica planes ni facturación de las cuentas externas.
+
+Los arrays son JSON. Los valores mostrados son ejemplos: reemplazalos por claves
+privadas; no las subas a Git. También se aceptan las claves singulares existentes
+`GEMINI_API_KEY`, `GROQ_API_KEY` y `AI_GATEWAY_API_KEY`, que se agregan al final de
+su lista sin duplicados. Cada proveedor sin credenciales se omite. Para usar
+solo los modelos/claves del Gateway, elegí `LLM_PROVIDER=vercel` y/o
+`MATCH_PROVIDER=vercel`. Los modos `gemini`, `groq` y `openai` mantienen el
+comportamiento anterior con una sola clave.
+
+El orden predeterminado es Gemini nativo → Groq nativo → Vercel (si está habilitado). Se prueban las
+claves del primer modelo antes de pasar al siguiente modelo configurado y luego
+al siguiente proveedor. Gemini parte de `GEMINI_MODEL`; Groq usa `CV_MODEL` o
+`MATCH_GROQ_MODEL` según la operación. Las listas `*_FALLBACK_MODELS` agregan
+alternativas. Vercel usa exclusivamente `AI_GATEWAY_MODELS`, con IDs
+`creador/modelo`. La API compatible con OpenAI está documentada en
+[Vercel AI Gateway](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions).
+
+Redis comparte los períodos de espera entre todos los workers. Una cuota local,
+429, timeout, 404 de modelo o 5xx permite pasar a otra ruta; 401/402/403 apartan
+la clave completa por `LLM_CREDENTIAL_COOLDOWN_SECONDS` (300 por defecto).
+`Retry-After`, cuotas de Gemini y cabeceras de saldo/reset de Groq se respetan.
+Cuando todas las rutas están ocupadas, Celery difiere el trabajo; las rutas se
+recorren una sola vez por llamada. JSON inválido, una respuesta truncada y otros
+errores 4xx siguen las validaciones/divisiones de paquetes existentes.
+
+Para Vercel, el presupuesto local por clave reserva entrada estimada más la
+salida máxima y concilia con `usage.total_tokens` cuando llega la respuesta:
+`AI_GATEWAY_REQUESTS_PER_MINUTE=20`, `AI_GATEWAY_TOKENS_PER_MINUTE=100000` y
+`AI_GATEWAY_REQUESTS_PER_DAY=10000`. Son controles locales configurables, no
+garantías de cuota del servicio. Los saldos/créditos reales pueden ser comunes
+a varias claves del mismo equipo; crear cuatro claves no multiplica ese saldo.
+Si el proveedor no informa saldo de tokens, se conserva la estimación local.
+
+`LLM_ROUTER_TIMEOUT_SECONDS=90` limita el tiempo disponible para iniciar nuevos
+intentos; cada petición usa un timeout de hasta `LLM_ATTEMPT_TIMEOUT_SECONDS=30`
+por fase HTTP. `AI_GATEWAY_MAX_OUTPUT_TOKENS=8192` limita la salida de Vercel;
+cada operación también conserva su presupuesto específico. No hay solicitudes
+de prueba ni reintentos HTTP internos. Los resultados guardan el modelo real y
+los checkpoints identifican la configuración de rutas. No se registran claves,
+prompts ni cuerpos de error del proveedor.
+
+Reiniciá API y worker tras cambiar el entorno. Este cambio no modifica `.env`,
+`.env.compose`, secretos ni despliegues automáticamente.
+
 ## Formatos de carga y límites
 
 `POST /api/v1/cv-analyses` acepta el campo multipart `cv` con PDF, DOCX, ODT o

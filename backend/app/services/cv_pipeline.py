@@ -184,6 +184,10 @@ def _call_openai(system_prompt: str, user_payload: str, request_marker: str,
 def _call_provider(system_prompt: str, user_payload: str, request_marker: str,
                    max_output_tokens: int | None = None) -> dict[str, Any]:
     provider = settings.LLM_PROVIDER.strip().lower()
+    if provider in {'auto', 'vercel'}:
+        from app.services.llm_router import generate_json
+        response = generate_json(system_prompt, user_payload, request_marker, max_output_tokens, mode=provider)
+        return {**response['content'], '__provider_model': response['model']}
     if provider == "openai":
         return _call_openai(system_prompt, user_payload, request_marker, max_output_tokens)
     if provider == "groq":
@@ -192,7 +196,7 @@ def _call_provider(system_prompt: str, user_payload: str, request_marker: str,
         from app.services.gemini_client import generate_json
         response = generate_json(system_prompt, user_payload, request_marker, max_output_tokens)
         return {**response['content'], '__provider_model': response['model']}
-    raise RuntimeError("LLM_PROVIDER must be 'openai', 'groq' or 'gemini'.")
+    raise RuntimeError("LLM_PROVIDER must be 'auto', 'vercel', 'openai', 'groq' or 'gemini'.")
 
 
 async def _call_async(system_prompt: str, payload: str, marker: str,
@@ -262,6 +266,7 @@ async def process_cv_text(
 ) -> dict[str, Any]:
     """Extract candidate-profile.v2 in job-isolated, resumable text packets."""
     external = identity or {}
+    from app.services.llm_router import configured_model
     source_hash = external.get("source_hash") or hashlib.sha256(text.encode("utf-8")).hexdigest()
     packet_identity = make_packet_identity(
         job_id=external.get("job_id") or str(uuid4()),
@@ -272,7 +277,8 @@ async def process_cv_text(
         text=text,
         prompt_version=checkpoint_prompt_version(checkpoint),
         provider=settings.LLM_PROVIDER,
-        model=(settings.GEMINI_MODEL if settings.LLM_PROVIDER.strip().lower() == "gemini" else
+        model=(configured_model(settings.LLM_PROVIDER.strip().lower()) if settings.LLM_PROVIDER.strip().lower() in {'auto', 'vercel'} else
+               settings.GEMINI_MODEL if settings.LLM_PROVIDER.strip().lower() == "gemini" else
                settings.OPENAI_MODEL if settings.LLM_PROVIDER.strip().lower() == "openai" else settings.CV_MODEL),
         packet_chars=settings.CV_PACKET_CHARACTERS,
         block_chars=settings.CV_BLOQUE_CARACTERES,

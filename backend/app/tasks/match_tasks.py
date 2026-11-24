@@ -78,7 +78,7 @@ def evaluate_match_task(self: Any, request_id: str) -> dict[str, Any]:
         failures = int(job.get('provider_unavailable_failures', 0)) + 1
         if failures >= self.max_retries:
             update_owned(status='failed', provider_unavailable_failures=failures,
-                         error='Gemini sigue sin estar disponible. Intentá calcular la compatibilidad más tarde.')
+                         error=f'{exc.provider_label} sigue sin estar disponible. Intentá calcular la compatibilidad más tarde.')
             return {'request_id': request_id, 'status': 'failed'}
         update_owned(status='processing', error=None, provider_unavailable_failures=failures)
         raise self.retry(exc=exc, countdown=exc.retry_countdown(failures),

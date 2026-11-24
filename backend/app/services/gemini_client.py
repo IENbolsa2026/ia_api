@@ -32,8 +32,19 @@ class GeminiError(RuntimeError):
     pass
 
 
+class GeminiRejected(GeminiError):
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        super().__init__(status_code)
+
+    def __str__(self) -> str:
+        return f'El proveedor rechazó la solicitud de análisis (HTTP {self.status_code}).'
+
+
 class GeminiUnavailable(GeminiError):
     """Temporary service/transport failure; one HTTP attempt per task admission."""
+
+    provider_label = 'Gemini'
 
     def __init__(self, retry_after_seconds: float = 30) -> None:
         self.retry_after_seconds = retry_after_seconds
@@ -66,8 +77,9 @@ class GeminiRateLimiter(RedisRateLimiter):
             budget.record_usage(input_tokens)
 
 
-def gemini_rate_limiter(model: str) -> RedisRateLimiter:
-    scope = hashlib.sha256(f'{settings.GEMINI_API_KEY}\0{model}'.encode()).hexdigest()[:32]
+def gemini_rate_limiter(model: str, api_key: str | None = None) -> RedisRateLimiter:
+    key = settings.GEMINI_API_KEY if api_key is None else api_key
+    scope = hashlib.sha256(f'{key}\0{model}'.encode()).hexdigest()[:32]
     return GeminiRateLimiter(
         redis.from_url(settings.JOB_STORE_REDIS_URL, decode_responses=True),
         settings.GEMINI_REQUESTS_PER_MINUTE, provider='gemini',
@@ -144,10 +156,12 @@ def _usage(body: dict[str, Any]) -> dict[str, int]:
 
 
 def generate_json(system_prompt: str, user_payload: str, marker: str,
-                  max_output_tokens: int | None = None) -> dict[str, Any]:
-    if not settings.GEMINI_API_KEY:
+                  max_output_tokens: int | None = None, *, api_key: str | None = None,
+                  model: str | None = None, timeout_seconds: float = 90) -> dict[str, Any]:
+    key = settings.GEMINI_API_KEY if api_key is None else api_key
+    if not key:
         raise GeminiError('El proveedor de análisis no está configurado.')
-    model = settings.GEMINI_MODEL.removeprefix('models/')
+    model = (model or settings.GEMINI_MODEL).removeprefix('models/')
     if not re.fullmatch(r'gemini-[A-Za-z0-9._-]+', model):
         raise GeminiError('El modelo de análisis configurado no es válido.')
     budget = min(max_output_tokens or settings.GEMINI_MAX_OUTPUT_TOKENS, settings.GEMINI_MAX_OUTPUT_TOKENS)
@@ -164,18 +178,18 @@ def generate_json(system_prompt: str, user_payload: str, marker: str,
     input_limit = min(settings.GEMINI_MAX_INPUT_TOKENS_PER_REQUEST, settings.GEMINI_INPUT_TOKENS_PER_MINUTE)
     if estimate > input_limit:
         raise ProviderInputLimitExceeded(estimate, input_limit)
-    limiter = gemini_rate_limiter(model)
+    limiter = gemini_rate_limiter(model) if api_key is None else gemini_rate_limiter(model, key)
     limiter.reserve(marker, estimate)
     try:
         response = httpx.post(
             f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
-            headers={'x-goog-api-key': settings.GEMINI_API_KEY, 'Content-Type': 'application/json'},
+            headers={'x-goog-api-key': key, 'Content-Type': 'application/json'},
             json={
                 'systemInstruction': {'parts': [{'text': system_prompt}]},
                 'contents': [{'role': 'user', 'parts': [{'text': user_payload}]}],
                 'generationConfig': config,
             },
-            timeout=httpx.Timeout(90, connect=10),
+            timeout=httpx.Timeout(timeout_seconds, connect=min(10, timeout_seconds)),
         )
     except (httpx.HTTPError, OSError):
         wait = limiter.defer(30)
@@ -200,7 +214,7 @@ def generate_json(system_prompt: str, user_payload: str, marker: str,
         logger.info('Gemini request deferred status=429 seconds=%.3f', max(delay, wait))
         raise RateLimitExceeded(max(delay, wait), reason='daily_budget' if daily_quota else 'provider') from None
     if response.status_code >= 400:
-        raise GeminiError(f'El proveedor rechazó la solicitud de análisis (HTTP {response.status_code}).')
+        raise GeminiRejected(response.status_code)
     try:
         limiter.record_response(response.headers, status_code=response.status_code, estimated_tokens=estimate)
     except redis.RedisError:

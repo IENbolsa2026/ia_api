@@ -379,7 +379,7 @@ def validate_manifest(
             raise PacketsIdentityError()
         try:
             profile_options = ({'preserve_skill_groups': True}
-                               if expected_identity.get('provider') == 'gemini'
+                               if expected_identity.get('provider') in {'gemini', 'auto', 'vercel'}
                                and expected_identity.get('prompt_version') == CV_EFFICIENT_PROMPT_VERSION else {})
             rebuilt, effective_plan = validate_and_build_profile_with_effective_plan(
                 consolidation["plan"], fragments, int(expected_identity["candidate_id"]),
@@ -494,7 +494,7 @@ async def process_packetized_cv_text(
 ) -> tuple[dict[str, Any], str | None]:
     previous_schema = checkpoint.get("schema_version") if isinstance(checkpoint, dict) else None
     manifest = new_manifest(text, identity) if checkpoint is None else validate_manifest(checkpoint, text, identity)
-    efficient = (identity.get('provider') == 'gemini'
+    efficient = (identity.get('provider') in {'gemini', 'auto', 'vercel'}
                  and identity.get('prompt_version') == CV_EFFICIENT_PROMPT_VERSION)
 
     async def save() -> None:
@@ -597,7 +597,7 @@ async def process_packetized_cv_text(
                 fixed_payload = json.loads(payload)
                 fixed_payload.update(text="", source_quotes={})
                 overhead = (prepare_gemini_input(system_prompt, json.dumps(fixed_payload, ensure_ascii=False))[2]
-                            if identity.get('provider') == 'gemini' else
+                            if identity.get('provider') in {'gemini', 'auto', 'vercel'} else
                             estimate_input_tokens(system_prompt + json.dumps(fixed_payload, ensure_ascii=False)))
                 # Shrinking the CV cannot remove instructions, schema or RAG.
                 # Do not recursively split to 40 chars and report an output error.

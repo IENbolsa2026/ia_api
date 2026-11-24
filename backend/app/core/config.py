@@ -1,6 +1,7 @@
 from enum import Enum
 import os
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AnyHttpUrl, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,6 +34,24 @@ class Settings(BaseSettings, extra="ignore"):
     MATCH_PROVIDER: str = "groq"
     GROQ_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
+    # JSON arrays in .env; singular keys remain supported by the legacy clients.
+    GEMINI_API_KEYS: list[str] = Field(default_factory=list, repr=False)
+    GROQ_API_KEYS: list[str] = Field(default_factory=list, repr=False)
+    AI_GATEWAY_API_KEY: str = Field(default="", repr=False)
+    AI_GATEWAY_ENABLED: bool = False
+    AI_GATEWAY_API_KEYS: list[str] = Field(default_factory=list, repr=False)
+    LLM_FALLBACK_ORDER: list[Literal['gemini', 'vercel', 'groq']] = Field(
+        default_factory=lambda: ['gemini', 'groq', 'vercel'])
+    GEMINI_FALLBACK_MODELS: list[str] = Field(default_factory=list)
+    GROQ_FALLBACK_MODELS: list[str] = Field(default_factory=list)
+    AI_GATEWAY_MODELS: list[str] = Field(default_factory=lambda: ['google/gemini-2.5-flash-lite', 'openai/gpt-4o-mini'])
+    AI_GATEWAY_MAX_OUTPUT_TOKENS: int = Field(default=8192, ge=1)
+    AI_GATEWAY_REQUESTS_PER_MINUTE: int = Field(default=20, ge=1)
+    AI_GATEWAY_TOKENS_PER_MINUTE: int = Field(default=100000, ge=1000)
+    AI_GATEWAY_REQUESTS_PER_DAY: int = Field(default=10000, ge=1)
+    LLM_ROUTER_TIMEOUT_SECONDS: int = Field(default=90, ge=1, le=180)
+    LLM_ATTEMPT_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=90)
+    LLM_CREDENTIAL_COOLDOWN_SECONDS: int = Field(default=300, ge=1, le=86400)
     GEMINI_MODEL: str = "gemini-3.5-flash-lite"
     GEMINI_REQUESTS_PER_MINUTE: int = Field(default=4, ge=1)
     GEMINI_PAUSA_SEGUNDOS: int = Field(default=0, ge=0)

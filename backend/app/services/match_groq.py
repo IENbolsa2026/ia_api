@@ -72,22 +72,40 @@ class GroqError(RuntimeError):
 class GroqClient:
     def _provider(self) -> str:
         provider = settings.MATCH_PROVIDER.strip().lower()
-        if provider not in {'groq', 'gemini'}:
+        if provider not in {'groq', 'gemini', 'auto', 'vercel'}:
             raise GroqError('El proveedor de compatibilidad no es válido.')
         return provider
 
     def _model(self) -> str:
+        if self._provider() in {'auto', 'vercel'}:
+            from app.services.llm_router import configured_model
+            return configured_model(self._provider(), 'match')
         return settings.GEMINI_MODEL if self._provider() == 'gemini' else (settings.MATCH_GROQ_MODEL or settings.CV_MODEL)
 
     def _budget(self) -> int:
+        if self._provider() in {'auto', 'vercel'}:
+            return settings.MATCH_GROQ_MAX_TOKENS
         return settings.GEMINI_MAX_OUTPUT_TOKENS if self._provider() == 'gemini' else settings.MATCH_GROQ_MAX_TOKENS
 
     def _require_key(self) -> None:
+        if self._provider() in {'auto', 'vercel'}:
+            from app.services.llm_router import routes
+            routes(self._provider(), 'match')
+            return
         key = settings.GEMINI_API_KEY if self._provider() == 'gemini' else settings.GROQ_API_KEY
         if not key:
             raise GroqError('El servicio de evaluación de compatibilidad no está configurado.')
 
     def _post(self, payload: dict[str, Any]) -> httpx.Response:
+        if self._provider() in {'auto', 'vercel'}:
+            from app.services.llm_router import generate_json
+            messages = payload['messages']
+            response = generate_json(messages[0]['content'], messages[1]['content'], 'match-provider',
+                                     payload['max_tokens'], mode=self._provider(), purpose='match')
+            return httpx.Response(200, json={
+                'choices': [{'message': {'content': json.dumps(response['content'], ensure_ascii=False)}, 'finish_reason': 'stop'}],
+                'model': response['model'], 'usage': response['usage'],
+            })
         if self._provider() == 'gemini':
             from app.services.gemini_client import generate_json
             messages = payload['messages']

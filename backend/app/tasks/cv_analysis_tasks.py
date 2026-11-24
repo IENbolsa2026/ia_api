@@ -23,6 +23,7 @@ from app.services.cv_artifacts import artifact_path, delete_artifact
 from app.services.document_extractor_runner import extract_in_subprocess
 from app.services.rate_limiter import ProviderInputLimitExceeded, ProviderOutputLimitExceeded, ProviderResponseTruncated, RateLimitExceeded
 from app.services.gemini_client import GeminiUnavailable
+from app.services.llm_router import configured_model as router_model
 from app.services.result_notifier import notify_extraction_result
 from app.services.channel_events import publish_cv_analysis_complete
 
@@ -162,7 +163,8 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
 
             provider = settings.LLM_PROVIDER.strip().lower()
             configured_model = (
-                settings.OPENAI_MODEL if provider == "openai"
+                router_model(provider) if provider in {'auto', 'vercel'}
+                else settings.OPENAI_MODEL if provider == "openai"
                 else settings.GEMINI_MODEL if provider == "gemini"
                 else settings.CV_MODEL
             )
@@ -199,7 +201,9 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
         else:
             raise ValueError("Unsupported extraction kind.")
         provider_model = getattr(result, "provider_model", None) or (
-            settings.OPENAI_MODEL if settings.LLM_PROVIDER.strip().lower() == "openai"
+            router_model(settings.LLM_PROVIDER.strip().lower())
+            if settings.LLM_PROVIDER.strip().lower() in {'auto', 'vercel'}
+            else settings.OPENAI_MODEL if settings.LLM_PROVIDER.strip().lower() == "openai"
             else settings.GEMINI_MODEL if settings.LLM_PROVIDER.strip().lower() == "gemini"
             else settings.CV_MODEL
         )
@@ -224,7 +228,7 @@ def run_extraction_task(self: Any, job_id: str) -> dict[str, Any]:
         previous = 0 if completed_now > completed_packets_at_start else int(job.get('provider_unavailable_failures', 0))
         failures = previous + 1
         exhausted = failures >= self.max_retries
-        error = 'Gemini sigue sin estar disponible. Intentá realizar el análisis más tarde.' if exhausted else None
+        error = f'{exc.provider_label} sigue sin estar disponible. Intentá realizar el análisis más tarde.' if exhausted else None
         try:
             store.update_owned(job_id, status='failed' if exhausted else 'processing',
                                error=error, provider_unavailable_failures=failures)
