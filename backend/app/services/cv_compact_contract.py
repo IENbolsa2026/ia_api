@@ -142,6 +142,18 @@ class WireFragment(_WireProfileFields):
 
     summary: str | None = Field(default=None, max_length=500, alias="s")
 
+    @field_validator('summary', mode='before')
+    @classmethod
+    def omit_oversized_optional_summary(cls, value):
+        # This is generated presentation prose, not the extracted facts. Asking
+        # the provider to rewrite it repeats a billed extraction and may hit a
+        # cooldown before the valid facts can be checkpointed. Keep all factual
+        # fields and evidence; let local presentation build a summary instead.
+        if isinstance(value, str) and len(value.strip()) > 500:
+            logger.info('CV fragment omitted oversized optional summary chars=%d', len(value))
+            return None
+        return value
+
 
 class WireProfile(_WireProfileFields):
     schema_version: Literal["candidate-profile.v2"] = Field(alias="v")

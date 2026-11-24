@@ -202,6 +202,7 @@ def generate_json(system: str, payload: str, marker: str, max_output_tokens: int
     waits: list[float] = []
     input_errors: list[ProviderInputLimitExceeded] = []
     outage = False
+    quota_wait = False
     for route in routes(mode, purpose):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -226,12 +227,18 @@ def generate_json(system: str, payload: str, marker: str, max_output_tokens: int
             input_errors.append(exc)
             continue
         except RateLimitExceeded as exc:
+            quota_wait = True
             waits.append(time.monotonic() + exc.retry_after_seconds)
         except GeminiUnavailable as exc:
             outage = True
             waits.append(time.monotonic() + exc.retry_after_seconds)
         logger.info('LLM fallback provider=%s model=%s', route.provider, route.model)
     wait = max(1, min(waits) - time.monotonic()) if waits else 30
+    if quota_wait:
+        # A healthy fallback may become ready before the failed provider's
+        # outage backoff. Yield until the earliest route is ready, without
+        # counting the primary outage as failure of every provider.
+        raise RateLimitExceeded(wait, reason='cooldown')
     if outage:
         raise ProvidersUnavailable(wait)
     if waits:

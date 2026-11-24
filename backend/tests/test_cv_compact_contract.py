@@ -4,6 +4,27 @@ from app.services.cv_compact_contract import contract_profile_to_wire, expand_pr
 
 
 class CompactCvContractTests(unittest.TestCase):
+    def test_oversized_optional_summary_does_not_discard_grounded_facts_or_retry(self):
+        source = 'Uso Python. Licenciatura en Historia en curso.'
+        raw = {
+            's': 'Descripción extensa. ' * 50,
+            'sk': [{'n': 'Python', 'k': 'technical', 'e': ['Declara uso de Python.'], 'q': ['Uso Python.']}],
+            'ed': [{'l': 'bachelor', 'f': 'Historia', 'st': 'in_progress',
+                    'c': False, 'q': ['Licenciatura en Historia en curso.']}],
+        }
+        expanded, compact = validate_fragment(raw, source)
+        self.assertIsNone(expanded['summary'])
+        self.assertEqual(expanded['skills'][0]['source_quotes'], ['Uso Python.'])
+        self.assertEqual(expanded['education'][0]['completion_status'], 'in_progress')
+        self.assertEqual(compact['sk'][0]['n'], 'Python')
+        self.assertEqual(raw['s'], 'Descripción extensa. ' * 50)
+
+    def test_overlong_summary_does_not_bypass_evidence_or_type_validation(self):
+        with self.assertRaises(ValueError):
+            validate_fragment({'s': 'x' * 501, 'sk': [{'n': 'Python', 'q': ['Inventado']}]}, 'Uso Python.')
+        with self.assertRaises(ValueError):
+            validate_fragment({'s': ['invalid']}, '')
+
     def test_generated_html_entities_are_decoded_but_literal_quotes_remain_unchanged(self):
         source = 'Uso de sistema de facturación.'
         expanded, _compact = validate_fragment({

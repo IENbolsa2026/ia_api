@@ -145,6 +145,19 @@ def test_all_outages_use_existing_celery_policy_and_serializable_error(setup_rou
     assert post.call_count == 9
 
 
+def test_primary_outage_does_not_delay_a_healthy_fallback_cooldown(setup_router, monkeypatch):
+    gemini, post, _, get_limiter = setup_router
+    monkeypatch.setattr(settings, 'AI_GATEWAY_ENABLED', False)
+    gemini.side_effect = router.GeminiUnavailable(30)
+    route = next(r for r in router.routes('auto') if r.provider == 'groq')
+    get_limiter(route).reserve.side_effect = RateLimitExceeded(4, reason='token_headroom')
+    with pytest.raises(RateLimitExceeded) as raised:
+        router.generate_json('system', 'source', 'marker')
+    assert raised.value.is_local_wait
+    assert 3 < raised.value.retry_after_seconds <= 4
+    post.assert_not_called()
+
+
 def test_time_budget_stops_remaining_attempts(setup_router):
     gemini, post, _, _ = setup_router
     with patch.object(router.time, 'monotonic', side_effect=[0, 0, 1, 91, 91]):
@@ -302,7 +315,7 @@ def test_auto_cv_fallback_preserves_grounded_facts_and_resumable_checkpoint(setu
     from app.services.cv_packets import validate_manifest
     _, post, _, _ = setup_router
     text = 'Uso Python para desarrollar aplicaciones.'
-    post.return_value = reply(content={'sk': [{
+    post.return_value = reply(content={'s': 'Resumen generado demasiado extenso. ' * 30, 'sk': [{
         'n': 'Python', 'k': 'technical', 'o': 'declared', 'l': 'beginner',
         'e': ['Desarrolla aplicaciones con Python.'], 'q': ['Uso Python para desarrollar aplicaciones.'],
     }]})
