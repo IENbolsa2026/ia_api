@@ -137,12 +137,50 @@ def _output_capacity_error(response: httpx.Response) -> ProviderOutputLimitExcee
     return None
 
 
+# Fields that only repeat the CV text literally. Gemini receives the full
+# profile; capacity-limited fallbacks (Groq free tier: 8000 tokens/minute)
+# receive the same facts without these duplicates. Array positions are kept,
+# so every JSON Pointer the provider returns still resolves in the original
+# profile, which the server validates against the full evidence map.
+_MATCH_HEAVY_FIELDS = frozenset({'source_quotes'})
+
+
+def _strip_heavy(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _strip_heavy(item) for key, item in value.items()
+                if key not in _MATCH_HEAVY_FIELDS and item not in (None, '', [], {})}
+    if isinstance(value, list):
+        return [_strip_heavy(item) for item in value]
+    return value
+
+
+def compact_match_payload(payload: str) -> str:
+    """Shrink a match batch for capacity-limited providers without changing facts."""
+    try:
+        data = json.loads(payload)
+    except ValueError:
+        return payload
+    if not isinstance(data, dict) or not isinstance(data.get('candidate_profile'), dict):
+        return payload
+    data['candidate_profile'] = _strip_heavy(data['candidate_profile'])
+    index = data.get('candidate_evidence_index')
+    if isinstance(index, dict) and isinstance(index.get('paths'), list):
+        index['paths'] = [path for path in index['paths']
+                          if not any(f'/{field}' in str(path) for field in _MATCH_HEAVY_FIELDS)]
+    elif isinstance(index, list):
+        data['candidate_evidence_index'] = [path for path in index
+                                            if not any(f'/{field}' in str(path) for field in _MATCH_HEAVY_FIELDS)]
+    return json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+
+
 def _http_json(route: Route, system: str, payload: str, marker: str, output: int | None,
                timeout: float, credential: RedisRateLimiter) -> dict[str, Any]:
     limit = settings.AI_GATEWAY_MAX_OUTPUT_TOKENS if route.provider == 'vercel' else settings.GROQ_MAX_TOKENS
     budget = min(output or limit, limit)
     # Apply the same compact source/quote transport used by native Gemini.
     payload, schema, _ = prepare_gemini_input(system, payload)
+    if marker == 'match-provider':
+        payload = compact_match_payload(payload)
     if schema is not None:
         system += '\nRespondé con este esquema JSON: ' + json.dumps(schema, ensure_ascii=False, separators=(',', ':'))
     estimate = estimate_request_tokens(system, payload, budget)
