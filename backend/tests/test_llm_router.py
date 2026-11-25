@@ -376,3 +376,61 @@ def test_match_can_adapt_413_even_when_gemini_is_unavailable(setup_router, monke
     with pytest.raises(ProviderInputLimitExceeded) as caught:
         router.generate_json('system', 'source', 'match-provider', purpose='match')
     assert (caught.value.estimated_tokens, caught.value.limit_tokens) == (8313, 7000)
+
+
+MATCH_STATE = {
+    'candidate_profile': {
+        'headline': 'Analista', 'summary': None,
+        'skills': [
+            {'name': 'Excel', 'level': 'intermediate', 'evidence': ['Armó tableros con fórmulas.'],
+             'source_quotes': ['Armé tableros de ventas con fórmulas en Excel'], 'years_experience': None},
+            {'name': 'Comunicación', 'evidence': ['Atención de clientes.'], 'source_quotes': ['Atendí clientes']},
+        ],
+        'education': [{'level': 'bachelor', 'field': 'Administración', 'source_quotes': ['Lic. en Administración, en curso']}],
+    },
+    'job_offer': {'requirements': [{'requirement_id': 'r1', 'text': 'Excel'}]},
+    'candidate_evidence_index': {'format': 'profile-json-pointer-patterns.v1',
+                                 'paths': ['/skills/*/name', '/skills/*/evidence/*', '/skills/*/source_quotes/*']},
+}
+
+
+def test_groq_match_payload_drops_literal_quotes_but_keeps_facts_and_positions():
+    compact = json.loads(router.compact_match_payload(json.dumps(MATCH_STATE)))
+    skills = compact['candidate_profile']['skills']
+    assert [skill['name'] for skill in skills] == ['Excel', 'Comunicación']  # same array positions
+    assert skills[0]['evidence'] == ['Armó tableros con fórmulas.']
+    assert 'source_quotes' not in json.dumps(compact['candidate_profile'])
+    assert 'summary' not in compact['candidate_profile'] and 'years_experience' not in skills[0]
+    assert compact['candidate_evidence_index']['paths'] == ['/skills/*/name', '/skills/*/evidence/*']
+    assert compact['job_offer'] == MATCH_STATE['job_offer']
+    assert len(json.dumps(compact)) < len(json.dumps(MATCH_STATE))
+
+
+def test_only_capacity_limited_routes_receive_the_compact_match_payload(setup_router, monkeypatch):
+    gemini, post, _, _ = setup_router
+    monkeypatch.setattr(settings, 'LLM_FALLBACK_ORDER', ['gemini', 'groq'])
+    payload = json.dumps(MATCH_STATE)
+    router.generate_json('system', payload, 'match-provider', purpose='match')
+    assert gemini.call_args.args[1] == payload  # Gemini got the full profile first
+    sent = json.loads(post.call_args.kwargs['json']['messages'][1]['content'])
+    assert 'source_quotes' not in json.dumps(sent)
+
+
+def test_cv_extraction_payload_is_never_compacted(setup_router, monkeypatch):
+    _, post, _, _ = setup_router
+    monkeypatch.setattr(settings, 'LLM_FALLBACK_ORDER', ['groq'])
+    payload = json.dumps({'candidate_profile': {'source_quotes': ['x']}})
+    router.generate_json('system', payload, 'cv-packet', purpose='cv')
+    assert 'source_quotes' in post.call_args.kwargs['json']['messages'][1]['content']
+
+
+def test_every_gemini_model_is_tried_before_groq(setup_router, monkeypatch):
+    gemini, post, _, _ = setup_router
+    monkeypatch.setattr(settings, 'LLM_FALLBACK_ORDER', ['gemini', 'groq'])
+    monkeypatch.setattr(settings, 'GEMINI_API_KEYS', ['gemini-1'])
+    monkeypatch.setattr(settings, 'GEMINI_MODEL', 'gemini-3.5-flash-lite')
+    monkeypatch.setattr(settings, 'GEMINI_FALLBACK_MODELS', ['gemini-3.1-flash-lite', 'gemini-3.5-flash'])
+    router.generate_json('system', 'payload', 'match-provider', purpose='match')
+    tried = [call.kwargs['model'] for call in gemini.call_args_list]
+    assert tried == ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash']
+    assert post.call_count == 1  # Groq only after every Gemini model failed
