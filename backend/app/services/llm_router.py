@@ -248,10 +248,19 @@ def _http_json(route: Route, system: str, payload: str, marker: str, output: int
             raise capacity_error
         raise RateLimitExceeded(limiter.record_response(response.headers, status_code=429, estimated_tokens=estimate))
     if response.status_code in {400, 422}:
-        # Invalid JSON generations and model-specific parameter rejections
-        # must not abort every fallback route. Keep the bad route bounded.
-        logger.info('LLM route rejected request provider=%s status=%d', route.provider, response.status_code)
-        raise ProvidersUnavailable(limiter.defer(30))
+        try:
+            error = response.json().get('error', {})
+            model_rejection = (error.get('code') in {
+                'json_validate_failed', 'unsupported_parameter', 'unsupported_value',
+                'unsupported_model', 'model_not_supported',
+            } or 'failed_generation' in error)
+        except (ValueError, AttributeError, TypeError):
+            model_rejection = False
+        if model_rejection:
+            # Rotate model-specific failures without hiding a globally malformed
+            # request. Never log the failed generation, which contains CV data.
+            logger.info('LLM route rejected generation provider=%s status=%d', route.provider, response.status_code)
+            raise ProvidersUnavailable(limiter.defer(30))
     if response.status_code in {401, 402, 403}:
         raise RateLimitExceeded(credential.defer(settings.LLM_CREDENTIAL_COOLDOWN_SECONDS), reason='cooldown')
     if response.status_code in {404, 408} or response.status_code >= 500:
