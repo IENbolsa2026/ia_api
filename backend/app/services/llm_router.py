@@ -170,6 +170,14 @@ def compact_match_payload(payload: str) -> str:
     elif isinstance(index, list):
         data['candidate_evidence_index'] = [path for path in index
                                             if not any(f'/{field}' in str(path) for field in _MATCH_HEAVY_FIELDS)]
+    elif isinstance(index, dict):
+        # The exact grouped index uses record prefixes and relative leaves.
+        # Remove references to fields absent from this provider's transport.
+        data['candidate_evidence_index'] = {
+            prefix: [leaf for leaf in leaves
+                     if not any(f'/{field}' in prefix + '/' + str(leaf) for field in _MATCH_HEAVY_FIELDS)]
+            for prefix, leaves in index.items() if isinstance(leaves, list)
+        }
     return json.dumps(data, ensure_ascii=False, separators=(',', ':'))
 
 
@@ -239,6 +247,11 @@ def _http_json(route: Route, system: str, payload: str, marker: str, output: int
             logger.info('LLM route output capacity unavailable provider=groq limit=%s', capacity_error.limit_num)
             raise capacity_error
         raise RateLimitExceeded(limiter.record_response(response.headers, status_code=429, estimated_tokens=estimate))
+    if response.status_code in {400, 422}:
+        # Invalid JSON generations and model-specific parameter rejections
+        # must not abort every fallback route. Keep the bad route bounded.
+        logger.info('LLM route rejected request provider=%s status=%d', route.provider, response.status_code)
+        raise ProvidersUnavailable(limiter.defer(30))
     if response.status_code in {401, 402, 403}:
         raise RateLimitExceeded(credential.defer(settings.LLM_CREDENTIAL_COOLDOWN_SECONDS), reason='cooldown')
     if response.status_code in {404, 408} or response.status_code >= 500:

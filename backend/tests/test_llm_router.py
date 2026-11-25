@@ -434,3 +434,21 @@ def test_every_gemini_model_is_tried_before_groq(setup_router, monkeypatch):
     tried = [call.kwargs['model'] for call in gemini.call_args_list]
     assert tried == ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash']
     assert post.call_count == 1  # Groq only after every Gemini model failed
+
+
+@pytest.mark.parametrize('status', [400, 422])
+def test_model_rejection_does_not_abort_other_fallbacks(setup_router, monkeypatch, status):
+    _, post, _, _ = setup_router
+    monkeypatch.setattr(settings, 'LLM_FALLBACK_ORDER', ['groq'])
+    monkeypatch.setattr(settings, 'GROQ_FALLBACK_MODELS', ['openai/gpt-oss-20b'])
+    post.side_effect = [reply(status, error={'code':'json_validate_failed', 'failed_generation':'private CV sentinel'}), reply()]
+    assert router.generate_json('system', 'source', 'match-provider', purpose='match')['model'] == 'actual-model'
+    assert post.call_count == 2
+
+
+def test_compact_match_keeps_grouped_references_consistent_with_transmitted_fields():
+    original = {'candidate_profile': {'skills': [{'name':'Python','evidence':['Usa Python.'], 'source_quotes':['Usa Python.']}]},
+                'candidate_evidence_index': {'/skills/0':['name','evidence/0','source_quotes/0']}}
+    compact = json.loads(router.compact_match_payload(json.dumps(original)))
+    assert compact['candidate_evidence_index']['/skills/0'] == ['name','evidence/0']
+    assert compact['candidate_profile']['skills'][0]['name'] == 'Python'
