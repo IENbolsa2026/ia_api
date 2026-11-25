@@ -166,7 +166,12 @@ class GroqClientTests(unittest.TestCase):
 
 
 class MatchInputBudgetTests(unittest.TestCase):
-    def test_pointer_patterns_preserve_facts_and_cover_every_reference(self):
+    def setUp(self):
+        model = patch.object(GroqClient, '_model', return_value='synthetic-model')
+        model.start()
+        self.addCleanup(model.stop)
+
+    def test_exact_grouped_pointers_preserve_facts_and_every_reference(self):
         from app.services.match_scoring import candidate_evidence_index
         profile = {'skills': [{'name': f'Skill {i}', 'level': 'unknown', 'evidence': ['Literal factual evidence.'],
                               'source_quotes': ['Literal factual evidence.']} for i in range(30)]}
@@ -179,9 +184,8 @@ class MatchInputBudgetTests(unittest.TestCase):
             GroqClient()._evaluate_v2_batch({'candidate_profile': profile, 'candidate_evidence_index': index,
                                            'job_offer': {'requirements': []}})
         compact = captured[0]['candidate_evidence_index']
-        patterns = compact['paths']
-        self.assertEqual(set(patterns), {'/'.join('*' if part.isdecimal() else part for part in pointer.split('/')) for pointer in index})
-        self.assertEqual(compact['format'], 'profile-json-pointer-patterns.v1')
+        expanded = {prefix+'/'+leaf for prefix, leaves in compact.items() for leaf in leaves}
+        self.assertEqual(expanded, set(index))
         self.assertEqual(captured[0]['candidate_profile'], profile)
         self.assertLess(len(json.dumps(compact)), len(json.dumps(sorted(index))))
 
@@ -253,3 +257,18 @@ class MatchInputBudgetTests(unittest.TestCase):
         self.assertEqual(result['status'], 'failed')
         self.assertIn('capacidad disponible', job['error'])
         retry.assert_not_called()
+
+    def test_invalid_reference_gets_one_correction_and_state_prefix_is_normalized(self):
+        state = {'candidate_profile': {'skills': [{'name': 'Python'}]},
+                 'candidate_evidence_index': {'/skills/0/name': 'Python'},
+                 'job_offer': {'requirements': [{'id':'python'}]}}
+        def reply(ref):
+            result = {'assessments': [{'requirement_id':'python', 'status':'met',
+                                      'explanation':'Habilidad declarada.', 'evidence_refs':[ref]}]}
+            return httpx.Response(200, json={'choices': [{'message': {'content':json.dumps(result)}}]})
+        with patch.object(GroqClient, '_require_key'), \
+             patch.object(GroqClient, '_post', side_effect=[reply('/skills/99/name'), reply('/candidate_profile/skills/0/name')]) as post:
+            result = GroqClient().evaluate_v2(state)
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(result['assessments'][0]['evidence_refs'], ['/skills/0/name'])
+        self.assertIn('respuesta anterior', post.call_args.args[0]['messages'][0]['content'])

@@ -217,23 +217,22 @@ class GroqClient:
         if len(actual) != len(set(actual)) or set(actual) != set(expected):
             raise GroqError('El proveedor devolvió juicios que no coinciden con este lote de requisitos.')
 
-    def _evaluate_v2_batch(self, state: dict[str, Any], *, on_part_completed=None) -> dict[str, Any]:
+    def _evaluate_v2_batch(self, state: dict[str, Any], *, on_part_completed=None, _repair_attempt=0) -> dict[str, Any]:
         self._require_key()
         schema = EvaluationV2.model_json_schema()
         provider_state = dict(state)
         evidence_index = provider_state.get("candidate_evidence_index")
         if isinstance(evidence_index, dict):
-            # All facts are already in candidate_profile. Sending hundreds of
-            # full pointers again can exhaust a free-tier token budget by
-            # itself. Describe the permitted fields once; array bounds and
-            # values stay in the unchanged profile. The server still checks
-            # every returned pointer against the exact original evidence map.
-            patterns = sorted({'/'.join('*' if part.isdecimal() else part
-                                         for part in pointer.split('/'))
-                               for pointer in evidence_index})
-            provider_state["candidate_evidence_index"] = {
-                'format': 'profile-json-pointer-patterns.v1', 'paths': patterns,
-            }
+            # List every exact permitted reference, sharing only the repeated
+            # record prefix. No wildcard can accidentally permit an empty or
+            # nonexistent field. Candidate facts remain unchanged.
+            groups = {}
+            for pointer in sorted(evidence_index):
+                parts = pointer.strip('/').split('/')
+                depth = 2 if len(parts) > 2 else 0
+                prefix = '/' + '/'.join(parts[:depth]) if depth else ''
+                groups.setdefault(prefix, []).append('/'.join(parts[depth:]))
+            provider_state["candidate_evidence_index"] = groups
         requirement_count = len(provider_state.get("job_offer", {}).get("requirements", []))
         # Strict JSON plus low-effort reasoning needs headroom: a truncated
         # assessment cannot be published and would waste a retry and quota.
@@ -257,10 +256,11 @@ class GroqClient:
             'partial si satisface una parte concreta o acredita la habilidad con un nivel explícitamente inferior; '
             'not_met si hay contradicción explícita; unknown si falta evidencia suficiente. '
             'No conviertas ausencia de información en contradicción ni uses partial como valor por defecto. '
-            'candidate_evidence_index.paths describe los campos permitidos como patrones JSON Pointer. '
-            'Reemplazá cada * por un índice real del array del candidate_profile, empezando en cero. '
-            'Por ejemplo, /skills/*/name permite /skills/0/name si esa habilidad existe. '
-            'Devolvé evidence_refs solo hacia valores presentes y no vacíos del perfil; no inventes índices ni claves. '
+            'candidate_evidence_index agrupa referencias exactas por prefijo. '
+            'Concatená prefijo + / + ruta de la lista para construir cada JSON Pointer permitido. '
+            'Por ejemplo, {"/skills/0":["name","evidence/0"]} permite /skills/0/name y /skills/0/evidence/0. '
+            'El prefijo vacío permite rutas de raíz. No agregues candidate_profile delante de las rutas. '
+            'Devolvé evidence_refs solo con esas rutas exactas; no inventes índices ni campos. '
             'Para unknown devolvé []. not_met requiere una contradicción explícita y su referencia; si solo falta información, usá unknown. '
             'La explicación visible debe estar en español y mencionar la evidencia o la falta de ella. '
             'Usá exclusivamente evaluation_date del estado recibido como fecha de referencia para comparar vencimientos; '
@@ -269,6 +269,10 @@ class GroqClient:
             'Devolvé exactamente un juicio por cada requirement_id y ninguno adicional. '
             'Respondé solo con JSON y este esquema: ' + json.dumps(schema, ensure_ascii=False, separators=(',', ':'))
         )
+        if _repair_attempt:
+            system += (' La respuesta anterior citó rutas de evidencia inválidas o afirmó un estado sin referencias. '
+                       'Volvé a evaluar cada requisito. Copiá únicamente rutas exactas del índice agrupado; '
+                       'si no hay evidencia suficiente, devolvé unknown con evidence_refs vacío.')
         response_format = ({'type': 'json_schema', 'json_schema': {
             'name': 'match_requirements', 'strict': True, 'schema': _STRICT_MATCH_SCHEMA,
         }} if self._provider() == 'groq' else {'type': 'json_object'})
@@ -309,6 +313,24 @@ class GroqClient:
             evaluation = EvaluationV2.model_validate_json(choice['message']['content'])
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise GroqError('El proveedor devolvió una evaluación inválida.') from exc
+        if isinstance(evidence_index, dict):
+            invalid = False
+            for assessment in evaluation.assessments:
+                if assessment.status == 'unknown':
+                    assessment.evidence_refs = []
+                    continue
+                refs = []
+                for ref in assessment.evidence_refs:
+                    # A state-root prefix is a reversible transport spelling;
+                    # normalize it only when the exact original leaf exists.
+                    candidate = ref.removeprefix('/candidate_profile')
+                    refs.append(candidate if ref not in evidence_index and candidate in evidence_index else ref)
+                assessment.evidence_refs = refs
+                invalid |= not refs or any(ref not in evidence_index for ref in refs)
+            if invalid:
+                if not _repair_attempt:
+                    return self._evaluate_v2_batch(state, on_part_completed=on_part_completed, _repair_attempt=1)
+                raise GroqError('El proveedor no devolvió referencias verificables para la compatibilidad.')
         result = {
             'assessments': [item.model_dump() for item in evaluation.assessments],
             'model': body.get('model', self._model()),
