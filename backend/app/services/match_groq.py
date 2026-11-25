@@ -1,6 +1,8 @@
 """Evaluación estructurada con Groq; el porcentaje se calcula en match_scoring.py."""
 from __future__ import annotations
 
+from app.services.rate_limiter import ProviderInputLimitExceeded
+
 import json
 from typing import Any, Callable
 
@@ -175,36 +177,38 @@ class GroqClient:
     ) -> dict[str, Any]:
         """Pide un juicio auditable por ID; el código aplica todos los pesos y puntajes."""
         requirements = state.get('job_offer', {}).get('requirements', [])
-        batches = [requirements[start:start + MATCH_REQUIREMENTS_PER_BATCH]
-                   for start in range(0, len(requirements), MATCH_REQUIREMENTS_PER_BATCH)]
-        if not batches:
-            batches = [[]]
         completed = list(completed_batches or [])
-        if len(completed) > len(batches):
-            raise ValueError('El progreso guardado del match no coincide con la oferta.')
-        for index, saved in enumerate(completed):
-            self._validate_batch(saved, batches[index])
+        offset = 0
+        for saved in completed:
+            size = len(saved['assessments'])
+            if (size > MATCH_REQUIREMENTS_PER_BATCH or offset + size > len(requirements)
+                    or (size == 0 and (requirements or len(completed) != 1))):
+                raise ValueError('El progreso guardado del match no coincide con la oferta.')
+            self._validate_batch(saved, requirements[offset:offset + size])
+            offset += size
 
-        assessments: list[dict[str, Any]] = []
-        usage = {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
-        model = None
-        for index, subset in enumerate(batches):
-            if index < len(completed):
-                batch = completed[index]
-            else:
-                batch_state = {**state, 'job_offer': {
-                    **state['job_offer'], 'requirements': subset,
-                }}
-                batch = self._evaluate_v2_batch(batch_state)
-                self._validate_batch(batch, subset)
-                completed.append(batch)
-                if on_batch_completed is not None:
-                    on_batch_completed(list(completed))
-            assessments.extend(batch['assessments'])
-            model = batch['model']
-            for key in usage:
-                usage[key] += batch['usage'].get(key, 0)
-        return {'assessments': assessments, 'model': model, 'usage': usage}
+        def save_part(batch):
+            nonlocal offset
+            size = len(batch['assessments'])
+            if not size and requirements:
+                raise GroqError('El proveedor omitió los requisitos del lote.')
+            self._validate_batch(batch, requirements[offset:offset + size])
+            completed.append(batch)
+            offset += size
+            if on_batch_completed is not None:
+                on_batch_completed(list(completed))
+
+        while offset < len(requirements) or not completed:
+            subset = requirements[offset:offset + MATCH_REQUIREMENTS_PER_BATCH]
+            self._evaluate_v2_batch({**state, 'job_offer': {
+                **state['job_offer'], 'requirements': subset,
+            }}, on_part_completed=save_part)
+        return {
+            'assessments': [item for batch in completed for item in batch['assessments']],
+            'model': completed[-1]['model'],
+            'usage': {key: sum(batch['usage'].get(key, 0) for batch in completed)
+                      for key in ('prompt_tokens', 'completion_tokens', 'total_tokens')},
+        }
 
     @staticmethod
     def _validate_batch(batch: dict[str, Any], requirements: list[dict[str, Any]]) -> None:
@@ -213,16 +217,23 @@ class GroqClient:
         if len(actual) != len(set(actual)) or set(actual) != set(expected):
             raise GroqError('El proveedor devolvió juicios que no coinciden con este lote de requisitos.')
 
-    def _evaluate_v2_batch(self, state: dict[str, Any]) -> dict[str, Any]:
+    def _evaluate_v2_batch(self, state: dict[str, Any], *, on_part_completed=None) -> dict[str, Any]:
         self._require_key()
         schema = EvaluationV2.model_json_schema()
         provider_state = dict(state)
         evidence_index = provider_state.get("candidate_evidence_index")
         if isinstance(evidence_index, dict):
-            # El perfil ya contiene cada hecho. Enviar también sus valores bajo un
-            # mapa de citas duplicaría casi todo el contexto; el proveedor solo
-            # necesita las claves JSON Pointer, que el servidor valida después.
-            provider_state["candidate_evidence_index"] = sorted(evidence_index)
+            # All facts are already in candidate_profile. Sending hundreds of
+            # full pointers again can exhaust a free-tier token budget by
+            # itself. Describe the permitted fields once; array bounds and
+            # values stay in the unchanged profile. The server still checks
+            # every returned pointer against the exact original evidence map.
+            patterns = sorted({'/'.join('*' if part.isdecimal() else part
+                                         for part in pointer.split('/'))
+                               for pointer in evidence_index})
+            provider_state["candidate_evidence_index"] = {
+                'format': 'profile-json-pointer-patterns.v1', 'paths': patterns,
+            }
         requirement_count = len(provider_state.get("job_offer", {}).get("requirements", []))
         # Strict JSON plus low-effort reasoning needs headroom: a truncated
         # assessment cannot be published and would waste a retry and quota.
@@ -246,14 +257,17 @@ class GroqClient:
             'partial si satisface una parte concreta o acredita la habilidad con un nivel explícitamente inferior; '
             'not_met si hay contradicción explícita; unknown si falta evidencia suficiente. '
             'No conviertas ausencia de información en contradicción ni uses partial como valor por defecto. '
-            'Devolvé evidence_refs con las claves JSON Pointer disponibles en candidate_evidence_index; no inventes claves. '
+            'candidate_evidence_index.paths describe los campos permitidos como patrones JSON Pointer. '
+            'Reemplazá cada * por un índice real del array del candidate_profile, empezando en cero. '
+            'Por ejemplo, /skills/*/name permite /skills/0/name si esa habilidad existe. '
+            'Devolvé evidence_refs solo hacia valores presentes y no vacíos del perfil; no inventes índices ni claves. '
             'Para unknown devolvé []. not_met requiere una contradicción explícita y su referencia; si solo falta información, usá unknown. '
             'La explicación visible debe estar en español y mencionar la evidencia o la falta de ella. '
             'Usá exclusivamente evaluation_date del estado recibido como fecha de referencia para comparar vencimientos; '
             'si una fecha de vigencia no está clara, el estado es unknown. No supongas la fecha actual. '
             'No calcules compatibilidad, confianza, pesos ni recomendaciones de contratación. '
             'Devolvé exactamente un juicio por cada requirement_id y ninguno adicional. '
-            'Respondé solo con JSON y este esquema: ' + json.dumps(schema, ensure_ascii=False)
+            'Respondé solo con JSON y este esquema: ' + json.dumps(schema, ensure_ascii=False, separators=(',', ':'))
         )
         response_format = ({'type': 'json_schema', 'json_schema': {
             'name': 'match_requirements', 'strict': True, 'schema': _STRICT_MATCH_SCHEMA,
@@ -262,7 +276,7 @@ class GroqClient:
                 'model': self._model(),
                 'messages': [
                     {'role': 'system', 'content': system},
-                    {'role': 'user', 'content': json.dumps(provider_state, ensure_ascii=False)},
+                    {'role': 'user', 'content': json.dumps(provider_state, ensure_ascii=False, separators=(',', ':'))},
                 ],
                 'temperature': 0,
                 'max_tokens': output_budget,
@@ -271,7 +285,20 @@ class GroqClient:
         if self._provider() == 'groq' and self._model() == 'qwen/qwen3.8-27b':
             payload['reasoning_effort'] = 'low'
             payload['reasoning_format'] = 'hidden'
-        response = self._post(payload)
+        try:
+            response = self._post(payload)
+        except ProviderInputLimitExceeded:
+            requirements = state.get('job_offer', {}).get('requirements', [])
+            if len(requirements) <= 1:
+                raise
+            middle = len(requirements) // 2
+            parts = [self._evaluate_v2_batch({**state, 'job_offer': {
+                **state['job_offer'], 'requirements': subset,
+            }}, on_part_completed=on_part_completed) for subset in (requirements[:middle], requirements[middle:])]
+            return {'assessments': [item for part in parts for item in part['assessments']],
+                    'model': parts[-1]['model'],
+                    'usage': {key: sum(part['usage'].get(key, 0) for part in parts)
+                              for key in ('prompt_tokens', 'completion_tokens', 'total_tokens')}}
         if response.status_code >= 400:
             raise GroqError(f'El proveedor rechazó la evaluación (HTTP {response.status_code}).')
         body = response.json()
@@ -282,8 +309,12 @@ class GroqClient:
             evaluation = EvaluationV2.model_validate_json(choice['message']['content'])
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise GroqError('El proveedor devolvió una evaluación inválida.') from exc
-        return {
+        result = {
             'assessments': [item.model_dump() for item in evaluation.assessments],
             'model': body.get('model', self._model()),
             'usage': body.get('usage', {}),
         }
+        if on_part_completed is not None:
+            self._validate_batch(result, state.get('job_offer', {}).get('requirements', []))
+            on_part_completed(result)
+        return result

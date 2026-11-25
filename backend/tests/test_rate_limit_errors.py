@@ -55,7 +55,7 @@ class RateLimitErrorTests(unittest.TestCase):
         self.assertNotIn("private provider message", str(caught.exception))
         user_payload = json.loads(post.call_args.kwargs["json"]["messages"][1]["content"])
         self.assertEqual(user_payload["candidate_profile"], profile)
-        self.assertEqual(user_payload["candidate_evidence_index"], ["/skills/0/evidence/0", "/skills/0/name"])
+        self.assertEqual(user_payload["candidate_evidence_index"], {"format": "profile-json-pointer-patterns.v1", "paths": ["/skills/*/evidence/*", "/skills/*/name"]})
 
     def _call_with_groq_error(self, provider_error):
         with patch.object(settings, "GROQ_API_KEY", "synthetic-key"), \

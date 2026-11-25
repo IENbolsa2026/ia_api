@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.services.match_job_store import MatchCancelled, MatchJobStore
 from app.services.job_store import LockOwnershipLost
 from app.services.match_groq import GroqClient
-from app.services.rate_limiter import RateLimitExceeded
+from app.services.rate_limiter import RateLimitExceeded, ProviderInputLimitExceeded
 from app.services.gemini_client import GeminiUnavailable
 from app.services.match_scoring import build_result, candidate_evidence_index, questions
 
@@ -74,6 +74,11 @@ def evaluate_match_task(self: Any, request_id: str) -> dict[str, Any]:
         return {'request_id': request_id, 'status': 'cancelled'}
     except Retry:
         raise
+    except ProviderInputLimitExceeded:
+        update_owned(status='failed', error=(
+            'El perfil supera la capacidad disponible para calcular la compatibilidad. '
+            'Intentá más tarde, cuando haya un proveedor con capacidad suficiente.'))
+        return {'request_id': request_id, 'status': 'failed'}
     except GeminiUnavailable as exc:
         failures = int(job.get('provider_unavailable_failures', 0)) + 1
         if failures >= self.max_retries:

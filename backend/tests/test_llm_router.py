@@ -357,3 +357,22 @@ def test_auto_cv_fallback_preserves_grounded_facts_and_resumable_checkpoint(setu
     checkpoint = checkpoints[-1]
     assert checkpoint['consolidation']['status'] == 'completed'
     validate_manifest(checkpoint, text, checkpoint['identity'])
+
+
+def test_413_rotates_to_next_model_without_retrying_same_request(setup_router, monkeypatch):
+    _, post, _, _ = setup_router
+    monkeypatch.setattr(settings, 'LLM_FALLBACK_ORDER', ['groq'])
+    monkeypatch.setattr(settings, 'GROQ_FALLBACK_MODELS', ['openai/gpt-oss-120b'])
+    post.side_effect = [reply(413, error={'message': 'Request too large. Limit 7000, Requested 8313'}), reply()]
+    router.generate_json('system', 'source', 'match-provider', purpose='match')
+    assert post.call_count == 2
+    assert post.call_args.kwargs['json']['model'] == 'openai/gpt-oss-120b'
+
+
+def test_match_can_adapt_413_even_when_gemini_is_unavailable(setup_router, monkeypatch):
+    _, post, _, _ = setup_router
+    monkeypatch.setattr(settings, 'LLM_FALLBACK_ORDER', ['gemini', 'groq'])
+    post.return_value = reply(413, error={'message': 'Request too large. Limit 7000, Requested 8313'})
+    with pytest.raises(ProviderInputLimitExceeded) as caught:
+        router.generate_json('system', 'source', 'match-provider', purpose='match')
+    assert (caught.value.estimated_tokens, caught.value.limit_tokens) == (8313, 7000)

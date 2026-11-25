@@ -176,6 +176,24 @@ def _http_json(route: Route, system: str, payload: str, marker: str, output: int
                               timeout=httpx.Timeout(timeout, connect=min(10, timeout)))
     except (httpx.HTTPError, OSError):
         raise ProvidersUnavailable(limiter.defer(30)) from None
+    if response.status_code == 413:
+        # No sleep can make the same oversized request fit. Try another
+        # route, then let the match client split its requirements if needed.
+        requested, limit = estimate, max(1, estimate - 1)
+        try:
+            error = response.json().get('error', {})
+            message = str(error.get('message', ''))
+            found_limit = re.search(r'(?i)\blimit\s*[:=]?\s*(\d+)', message)
+            found_requested = re.search(r'(?i)\brequested\s*[:=]?\s*(\d+)', message)
+            if found_limit and int(found_limit[1]) > 0:
+                limit = int(found_limit[1])
+            if found_requested:
+                requested = int(found_requested[1])
+        except (ValueError, TypeError, AttributeError):
+            pass
+        logger.info('LLM route input capacity unavailable provider=%s requested=%d limit=%d',
+                    route.provider, requested, limit)
+        raise ProviderInputLimitExceeded(requested, limit)
     if response.status_code == 429:
         capacity_error = _output_capacity_error(response) if route.provider == 'groq' else None
         if capacity_error is not None:
@@ -259,6 +277,10 @@ def generate_json(system: str, payload: str, marker: str, max_output_tokens: int
             waits.append(time.monotonic() + exc.retry_after_seconds)
         logger.info('LLM fallback provider=%s model=%s', route.provider, route.model)
     wait = max(1, min(waits) - time.monotonic()) if waits else 30
+    if purpose == 'match' and input_errors:
+        # Prefer adapting this batch over repeating a known-too-large request
+        # while the primary provider is unavailable or cooling down.
+        raise max(input_errors, key=lambda exc: exc.limit_tokens)
     if quota_wait:
         # A healthy fallback may become ready before the failed provider's
         # outage backoff. Yield until the earliest route is ready, without
