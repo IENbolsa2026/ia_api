@@ -4,6 +4,7 @@ from __future__ import annotations
 from app.services.rate_limiter import ProviderInputLimitExceeded
 
 import json
+import re
 from typing import Any, Callable
 
 import httpx
@@ -15,6 +16,29 @@ from app.services.rate_limiter import RateLimitExceeded, estimate_request_tokens
 MATCH_RUBRIC_V2_VERSION = "match-rubric.v3-points"
 MATCHER_PROMPT_V2_VERSION = "match-groq.v3-evidence"
 MATCH_REQUIREMENTS_PER_BATCH = 5
+
+
+def _canonical_evidence_refs(refs, evidence_index):
+    """Expand an exact cited record into its existing leaves, never guess facts.
+
+    Models sometimes cite /languages/1 or /education/2 instead of one leaf.
+    These already identify a specific fact record. Accept only known groups,
+    keep every existing descendant and reject expansions exceeding 8 refs.
+    """
+    result = []
+    for ref in refs:
+        candidate = ref if ref in evidence_index else ref.removeprefix('/candidate_profile')
+        if candidate in evidence_index:
+            result.append(candidate)
+            continue
+        if re.fullmatch(r'/(?:skills|work_experience|projects|education|languages|credentials)/[0-9]+(?:/(?:evidence|source_quotes|highlights))?', candidate):
+            leaves = [pointer for pointer in evidence_index if pointer.startswith(candidate + '/')]
+            if leaves:
+                result.extend(leaves)
+                continue
+        result.append(ref)
+    result = list(dict.fromkeys(result))
+    return result if len(result) <= 8 else list(refs)
 
 
 class Dimension(BaseModel):
@@ -319,12 +343,7 @@ class GroqClient:
                 if assessment.status == 'unknown':
                     assessment.evidence_refs = []
                     continue
-                refs = []
-                for ref in assessment.evidence_refs:
-                    # A state-root prefix is a reversible transport spelling;
-                    # normalize it only when the exact original leaf exists.
-                    candidate = ref.removeprefix('/candidate_profile')
-                    refs.append(candidate if ref not in evidence_index and candidate in evidence_index else ref)
+                refs = _canonical_evidence_refs(assessment.evidence_refs, evidence_index)
                 assessment.evidence_refs = refs
                 invalid |= not refs or any(ref not in evidence_index for ref in refs)
             if invalid:
