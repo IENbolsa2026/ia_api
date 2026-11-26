@@ -16,6 +16,8 @@ from typing import Any
 import httpx
 import redis
 
+from app.services.usage_metrics import record_response as record_usage_metrics
+
 from app.core.config import settings
 from app.services.cv_request_budget import prepare_gemini_input
 from app.services.gemini_budget import GeminiBudgetLimiter
@@ -192,9 +194,16 @@ def generate_json(system_prompt: str, user_payload: str, marker: str,
             timeout=httpx.Timeout(timeout_seconds, connect=min(10, timeout_seconds)),
         )
     except (httpx.HTTPError, OSError):
+        record_usage_metrics('gemini', model, 0)
         wait = limiter.defer(30)
         logger.warning('Gemini request deferred reason=transport seconds=%.3f', wait)
         raise GeminiUnavailable(wait) from None
+    try:
+        metric_body = response.json()
+        metric_usage = _usage(metric_body) if isinstance(metric_body, dict) else {}
+    except ValueError:
+        metric_usage = {}
+    record_usage_metrics('gemini', model, response.status_code, metric_usage)
     if response.status_code in {500, 502, 503, 504}:
         wait = limiter.defer(_retry_delay(response, default=30))
         logger.warning('Gemini request deferred status=%d seconds=%.3f', response.status_code, wait)

@@ -14,3 +14,10 @@ def isolated_provider_defaults(monkeypatch):
         'CV_EXTRACTION_MAX_TOKENS': 950, 'CV_PACKET_CHARACTERS': 500, 'CV_BLOQUE_CARACTERES': 4000,
     }.items():
         monkeypatch.setattr(settings, name, value)
+
+
+@pytest.fixture(autouse=True)
+def isolate_usage_monitor(monkeypatch):
+    from unittest.mock import MagicMock
+    from app.services import usage_metrics
+    monkeypatch.setattr(usage_metrics, 'client', MagicMock(return_value=MagicMock()))

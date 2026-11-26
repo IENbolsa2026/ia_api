@@ -18,6 +18,8 @@ from typing import Any
 import httpx
 import redis
 
+from app.services.usage_metrics import record_response as record_usage_metrics
+
 from app.core.config import settings
 from app.services.cv_request_budget import prepare_gemini_input
 from app.services.gemini_budget import GeminiBudgetLimiter
@@ -221,7 +223,16 @@ def _http_json(route: Route, system: str, payload: str, marker: str, output: int
         response = httpx.post(url, headers={'Authorization': f'Bearer {route.key}'}, json=request,
                               timeout=httpx.Timeout(timeout, connect=min(10, timeout)))
     except (httpx.HTTPError, OSError):
+        record_usage_metrics(route.provider, route.model, 0)
         raise ProvidersUnavailable(limiter.defer(30)) from None
+    try:
+        metric_body = response.json()
+        metric_usage = metric_body.get('usage', {}) if isinstance(metric_body, dict) else {}
+        if not isinstance(metric_usage, dict):
+            metric_usage = {}
+    except ValueError:
+        metric_usage = {}
+    record_usage_metrics(route.provider, route.model, response.status_code, metric_usage)
     if response.status_code == 413:
         # No sleep can make the same oversized request fit. Try another
         # route, then let the match client split its requirements if needed.
